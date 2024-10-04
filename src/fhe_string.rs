@@ -1,18 +1,20 @@
 use std::ops::Deref;
 
-use tfhe::{prelude::{FheDecrypt, FheEncrypt}, ClientKey, FheUint8};
+use tfhe::integer::RadixCiphertext;
+
+use crate::client_key::ClientKey;
 
 const N: usize = 4;
 
 #[derive(Clone)]
 pub struct FheString {
-    bytes: Vec<FheUint8>,
-    padded: bool,
+    pub(crate) bytes: Vec<RadixCiphertext>,
+    pub(crate) padded: bool,
 }
 
 impl FheString {
     pub fn encrypt(string: PlaintextString, ck: &ClientKey) -> Self {
-        let bytes = string.bytes().map(|b| FheUint8::encrypt(b, ck)).collect();
+        let bytes = string.bytes().map(|b| ck.key.encrypt_radix(b, 4)).collect();
         Self {
             bytes,
             padded: false,
@@ -20,7 +22,7 @@ impl FheString {
     }
 
     pub fn decrypt(&self, ck: &ClientKey) -> PlaintextString {
-        let bytes = self.bytes.iter().map(|b| b.decrypt(ck)).collect();
+        let bytes = self.bytes.iter().map(|b| ck.key.decrypt_radix(b)).collect();
         PlaintextString::new(String::from_utf8(bytes).unwrap())
     }
 }

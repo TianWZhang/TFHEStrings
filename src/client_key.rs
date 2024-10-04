@@ -1,19 +1,19 @@
-use std::ops::Deref;
-
+use serde::{Deserialize, Serialize};
 use tfhe::{integer::ClientKey as TfheClientKey, shortint::ShortintParameterSet};
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ClientKey {
-    key: TfheClientKey
+    pub key: TfheClientKey,
 }
 
 impl ClientKey {
     pub fn new<P>(parameters: P) -> Self
-    where 
+    where
         P: TryInto<ShortintParameterSet>,
         <P as TryInto<ShortintParameterSet>>::Error: std::fmt::Debug,
     {
         Self {
-            key: TfheClientKey::new(parameters)
+            key: TfheClientKey::new(parameters),
         }
     }
 }
