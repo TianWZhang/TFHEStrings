@@ -100,7 +100,7 @@ impl ServerKey {
     ///
     /// The pattern to search for can be specified as either `GenericPattern::Clear` for a clear
     /// string or `GenericPattern::Enc` for an encrypted string.
-    pub fn find(
+    pub fn rfind(
         &self,
         str: &FheString,
         pattern: &GenericPattern,
@@ -126,7 +126,7 @@ impl ServerKey {
     ///
     /// The pattern to search for can be specified as either `GenericPattern::Clear` for a clear
     /// string or `GenericPattern::Enc` for an encrypted string.
-    pub fn rfind(
+    pub fn find(
         &self,
         str: &FheString,
         pattern: &GenericPattern,
