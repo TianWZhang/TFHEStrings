@@ -25,9 +25,14 @@ impl FheString {
         }
     }
 
-    pub fn decrypt(&self, ck: &ClientKey) -> PlaintextString {
-        let bytes = self.bytes.iter().map(|b| ck.key.decrypt_radix(b)).collect();
-        PlaintextString::new(String::from_utf8(bytes).unwrap())
+    pub fn decrypt(&self, ck: &ClientKey) -> String {
+        let bytes = self
+            .bytes
+            .iter()
+            .map(|b| ck.key.decrypt_radix(b))
+            .filter(|b| *b != 0)
+            .collect();
+        String::from_utf8(bytes).unwrap()
     }
 
     /// Constructs a trivial `FheString` from a plaintext string and a [`ServerKey`].

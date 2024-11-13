@@ -1,9 +1,6 @@
 use super::ServerKey;
 use crate::fhe_string::{FheString, GenericPattern, PlaintextString, NUM_BLOCKS};
-use tfhe::{
-    integer::{prelude::ServerKeyDefaultCMux, BooleanBlock, IntegerCiphertext, RadixCiphertext},
-    shortint::Ciphertext,
-};
+use tfhe::integer::{prelude::ServerKeyDefaultCMux, BooleanBlock, RadixCiphertext};
 
 impl ServerKey {
     // Compare `pattern` with `str`, with `pattern` shifted in range [l..=r].
@@ -23,7 +20,7 @@ impl ServerKey {
             .map(|start| {
                 let substr = &str.clone().bytes[start..];
                 let pattern_slice = &pattern.clone().bytes[..];
-                let is_matched = self.string_eq(substr, pattern_slice);
+                let is_matched = self.fhestrings_eq(substr, pattern_slice);
                 (start, is_matched)
             })
             .collect();
@@ -53,26 +50,7 @@ impl ServerKey {
         let matched: Vec<_> = range
             .map(|start| {
                 let substr = &str.clone().bytes[start..];
-                let blocks_substr: Vec<Ciphertext> = substr
-                    .into_iter()
-                    .rev()
-                    .flat_map(|c| c.blocks().to_owned())
-                    .collect();
-                let blocks_substr_len = blocks_substr.len();
-                let mut substr = RadixCiphertext::from_blocks(blocks_substr);
-
-                let mut pattern_plaintext = pattern.data.as_str();
-                if blocks_substr_len < pattern.data.len() * NUM_BLOCKS {
-                    pattern_plaintext = &pattern_plaintext[..blocks_substr_len / NUM_BLOCKS];
-                } else if blocks_substr_len > pattern.data.len() * NUM_BLOCKS {
-                    let diff = blocks_substr_len - pattern.data.len() * NUM_BLOCKS;
-                    self.key.trim_radix_blocks_lsb_assign(&mut substr, diff);
-                }
-                let pattern_plaintext_uint =
-                    self.pad_cipher_and_plaintext_lsb(&mut substr, pattern_plaintext);
-                let is_matched = self
-                    .key
-                    .scalar_eq_parallelized(&substr, pattern_plaintext_uint);
+                let is_matched = self.fhestring_eq_string(substr, pattern.data.as_str());
                 (start, is_matched)
             })
             .collect();

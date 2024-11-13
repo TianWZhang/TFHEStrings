@@ -8,7 +8,7 @@ use tfhe::integer::{
 
 use crate::{
     client_key::ClientKey,
-    fhe_string::{FheString, N, NUM_BLOCKS},
+    fhe_string::{FheString, GenericPattern, PlaintextString, N, NUM_BLOCKS},
 };
 
 pub mod contains;
@@ -68,7 +68,7 @@ impl ServerKey {
         rhs_plaintext
     }
 
-    fn string_eq(&self, lhs: &[RadixCiphertext], rhs: &[RadixCiphertext]) -> BooleanBlock {
+    fn fhestrings_eq(&self, lhs: &[RadixCiphertext], rhs: &[RadixCiphertext]) -> BooleanBlock {
         let blocks_lhs = lhs
             .into_iter()
             .rev()
@@ -83,6 +83,39 @@ impl ServerKey {
         let mut rhs = RadixCiphertext::from_blocks(blocks_rhs);
         self.trim_ciphertexts_lsb(&mut lhs, &mut rhs);
         self.key.eq_parallelized(&lhs, &rhs)
+    }
+
+    fn fhestring_eq_string(&self, lhs: &[RadixCiphertext], rhs: &str) -> BooleanBlock {
+        let blocks_lhs: Vec<_> = lhs
+            .into_iter()
+            .rev()
+            .flat_map(|c| c.blocks().to_owned())
+            .collect();
+        let blocks_lhs_len = blocks_lhs.len();
+        let mut lhs = RadixCiphertext::from_blocks(blocks_lhs);
+
+        let mut rhs = rhs;
+        if blocks_lhs_len < rhs.len() * NUM_BLOCKS {
+            rhs = &rhs[..blocks_lhs_len / NUM_BLOCKS];
+        } else if blocks_lhs_len > rhs.len() * NUM_BLOCKS {
+            let diff = blocks_lhs_len - rhs.len() * NUM_BLOCKS;
+            self.key.trim_radix_blocks_lsb_assign(&mut lhs, diff);
+        }
+        let rhs_uint = self.pad_cipher_and_plaintext_lsb(&mut lhs, rhs);
+
+        self.key.scalar_eq_parallelized(&lhs, rhs_uint)
+    }
+
+    pub fn eq(&self, lhs: &FheString, rhs: &GenericPattern) -> BooleanBlock {
+        match rhs {
+            GenericPattern::Enc(pat) => self.fhestrings_eq(&lhs.bytes, &pat.bytes),
+            GenericPattern::Clear(pat) => self.fhestring_eq_string(&lhs.bytes, &pat.data),
+        }
+    }
+
+    pub fn ne(&self, lhs: &FheString, rhs: &GenericPattern) -> BooleanBlock {
+        let eq = self.eq(lhs, rhs);
+        self.key.boolean_bitnot(&eq)
     }
 
     pub fn to_lowercase(&self, str: &FheString) -> FheString {
@@ -129,6 +162,24 @@ impl ServerKey {
         }
     }
 
+    /// Returns `true` if an encrypted string and a pattern (either encrypted or clear) are equal,
+    /// ignoring case differences.
+    ///
+    /// Returns `false` if they are not equal.
+    ///
+    /// The pattern for comparison (`rhs`) can be specified as either `GenericPattern::Clear` for a
+    /// clear string or `GenericPattern::Enc` for an encrypted string.
+    pub fn eq_ignore_case(&self, lhs: &FheString, rhs: &GenericPattern) -> BooleanBlock {
+        let (lhs, rhs) = rayon::join(
+            || self.to_lowercase(lhs), 
+            || match rhs {
+                GenericPattern::Enc(rhs) => GenericPattern::Enc(self.to_lowercase(rhs)),
+                GenericPattern::Clear(rhs) => GenericPattern::Clear(PlaintextString::new(rhs.data.to_lowercase())),
+            },
+        );
+        self.eq(&lhs, &rhs)
+    }
+
     pub fn len(&self, str: &FheString) -> usize {
         str.bytes.len()
     }
@@ -160,7 +211,7 @@ mod tests {
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_s_tolowercase = sk.to_lowercase(&fhe_s);
         let s_tolowercase = fhe_s_tolowercase.decrypt(&ck);
-        assert_eq!(s_tolowercase.data, s.to_lowercase());
+        assert_eq!(s_tolowercase, s.to_lowercase());
     }
 
     #[test]
@@ -170,6 +221,6 @@ mod tests {
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_s_touppercase = sk.to_uppercase(&fhe_s);
         let s_touppercase = fhe_s_touppercase.decrypt(&ck);
-        assert_eq!(s_touppercase.data, s.to_uppercase());
+        assert_eq!(s_touppercase, s.to_uppercase());
     }
 }

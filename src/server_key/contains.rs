@@ -1,9 +1,9 @@
 use tfhe::{
-    integer::{BooleanBlock, IntegerCiphertext, IntegerRadixCiphertext, RadixCiphertext},
+    integer::{BooleanBlock, IntegerRadixCiphertext, RadixCiphertext},
     shortint::Ciphertext,
 };
 
-use crate::fhe_string::{FheString, GenericPattern, PlaintextString, NUM_BLOCKS};
+use crate::fhe_string::{FheString, GenericPattern, PlaintextString};
 
 use super::ServerKey;
 
@@ -19,7 +19,7 @@ impl ServerKey {
             .map(|start| {
                 let substr = &str.clone().bytes[start..];
                 let pattern_slice = &pattern.clone().bytes[..];
-                self.string_eq(substr, pattern_slice)
+                self.fhestrings_eq(substr, pattern_slice)
             })
             .collect();
 
@@ -47,25 +47,7 @@ impl ServerKey {
         let matched: Vec<_> = (l..=r)
             .map(|start| {
                 let substr = &str.clone().bytes[start..];
-                let blocks_substr: Vec<Ciphertext> = substr
-                    .into_iter()
-                    .rev()
-                    .flat_map(|c| c.blocks().to_owned())
-                    .collect();
-                let blocks_substr_len = blocks_substr.len();
-                let mut substr = RadixCiphertext::from_blocks(blocks_substr);
-
-                let mut pattern_plaintext = pattern.data.as_str();
-                if blocks_substr_len < pattern.data.len() * NUM_BLOCKS {
-                    pattern_plaintext = &pattern_plaintext[..blocks_substr_len / NUM_BLOCKS];
-                } else if blocks_substr_len > pattern.data.len() * NUM_BLOCKS {
-                    let diff = blocks_substr_len - pattern.data.len() * NUM_BLOCKS;
-                    self.key.trim_radix_blocks_lsb_assign(&mut substr, diff);
-                }
-                let pattern_plaintext_uint =
-                    self.pad_cipher_and_plaintext_lsb(&mut substr, pattern_plaintext);
-                self.key
-                    .scalar_eq_parallelized(&substr, pattern_plaintext_uint)
+                self.fhestring_eq_string(substr, pattern.data.as_str())
             })
             .collect();
 
@@ -91,14 +73,24 @@ impl ServerKey {
     /// string or `GenericPattern::Enc` for an encrypted string.
     pub fn contains(&self, str: &FheString, pattern: &GenericPattern) -> BooleanBlock {
         match pattern {
-            GenericPattern::Clear(pattern) => self.compare_shifted_plaintext(
-                str,
-                &pattern,
-                0,
-                str.bytes.len() - pattern.data.len(),
-            ),
+            GenericPattern::Clear(pattern) => {
+                if str.bytes.len() < pattern.data.len() {
+                    return self.key.create_trivial_boolean_block(false);
+                }
+                let diff = str.bytes.len() - pattern.data.len();
+                self.compare_shifted_plaintext(
+                    str,
+                    &pattern,
+                    0,
+                    diff,
+                )
+            }
             GenericPattern::Enc(pattern) => {
-                self.compare_shifted(str, &pattern, 0, str.bytes.len() - pattern.bytes.len())
+                if str.bytes.len() < pattern.bytes.len() {
+                    return self.key.create_trivial_boolean_block(false);
+                }
+                let diff = str.bytes.len() - pattern.bytes.len();
+                self.compare_shifted(str, &pattern, 0, diff)
             }
         }
     }
@@ -126,18 +118,30 @@ impl ServerKey {
     /// string or `GenericPattern::Enc` for an encrypted string.
     pub fn ends_with(&self, str: &FheString, pattern: &GenericPattern) -> BooleanBlock {
         match pattern {
-            GenericPattern::Clear(pattern) => self.compare_shifted_plaintext(
-                str,
-                &pattern,
-                str.bytes.len() - pattern.data.len(),
-                str.bytes.len() - pattern.data.len(),
-            ),
-            GenericPattern::Enc(pattern) => self.compare_shifted(
-                str,
-                &pattern,
-                str.bytes.len() - pattern.bytes.len(),
-                str.bytes.len() - pattern.bytes.len(),
-            ),
+            GenericPattern::Clear(pattern) => {
+                if str.bytes.len() < pattern.data.len() {
+                    return self.key.create_trivial_boolean_block(false);
+                }
+                let diff = str.bytes.len() - pattern.data.len();
+                self.compare_shifted_plaintext(
+                    str,
+                    &pattern,
+                    diff,
+                    diff,
+                )
+            }
+            GenericPattern::Enc(pattern) => {
+                if str.bytes.len() < pattern.bytes.len() {
+                    return self.key.create_trivial_boolean_block(false);
+                }
+                let diff = str.bytes.len() - pattern.bytes.len();
+                self.compare_shifted(
+                    str,
+                    &pattern,
+                    diff,
+                    diff,
+                )
+            }
         }
     }
 }
