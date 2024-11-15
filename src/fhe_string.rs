@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use tfhe::integer::RadixCiphertext;
+use tfhe::integer::{IntegerCiphertext, IntegerRadixCiphertext, RadixCiphertext};
 
 use crate::{client_key::ClientKey, server_key::ServerKey};
 
@@ -44,6 +44,56 @@ impl FheString {
             .collect();
         Self {
             bytes,
+            padded: false,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            bytes: vec![],
+            padded: false,
+        }
+    }
+
+    // Converts a `FheString` to a `RadixCiphertext`, taking 4 blocks for each `FheAsciiChar`.
+    // We can then use a single large uint, that represents a string, in tfhe-rs operations.
+    pub fn to_uint(&self, sk: &ServerKey) -> RadixCiphertext {
+        self.clone().into_uint(sk)
+    }
+
+    pub fn into_uint(self, sk: &ServerKey) -> RadixCiphertext {
+        let blocks: Vec<_> = self
+            .bytes
+            .into_iter()
+            .rev()
+            .flat_map(|c| c.into_blocks())
+            .collect();
+        let mut uint = RadixCiphertext::from_blocks(blocks);
+        if uint.blocks().is_empty() {
+            sk.key
+                .extend_radix_with_trivial_zero_blocks_lsb_assign(&mut uint, NUM_BLOCKS);
+        }
+
+        uint
+    }
+
+    /// Converts a `RadixCiphertext` to a `FheString`, building a `FheAsciiChar` for each `NUM_BLOCKS` blocks.
+    /// Panics if the uint doesn't have a number of blocks that is multiple of `NUM_BLOCKS`.
+    pub fn from_uint(uint: RadixCiphertext) -> Self {
+        let blocks_len = uint.blocks().len();
+        assert_eq!(blocks_len % NUM_BLOCKS, 0);
+
+        let mut blocks = uint.into_blocks();
+        blocks.reverse();
+
+        let bytes = blocks
+            .chunks_exact(NUM_BLOCKS)
+            .map(|chuck| RadixCiphertext::from_blocks(chuck.iter().rev().cloned().collect()))
+            .collect();
+
+        Self {
+            bytes,
+            // We are assuming here there's no padding, so this isn't safe if we don't know it!
             padded: false,
         }
     }

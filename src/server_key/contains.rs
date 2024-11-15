@@ -78,12 +78,7 @@ impl ServerKey {
                     return self.key.create_trivial_boolean_block(false);
                 }
                 let diff = str.bytes.len() - pattern.data.len();
-                self.compare_shifted_plaintext(
-                    str,
-                    &pattern,
-                    0,
-                    diff,
-                )
+                self.compare_shifted_plaintext(str, &pattern, 0, diff)
             }
             GenericPattern::Enc(pattern) => {
                 if str.bytes.len() < pattern.bytes.len() {
@@ -123,24 +118,14 @@ impl ServerKey {
                     return self.key.create_trivial_boolean_block(false);
                 }
                 let diff = str.bytes.len() - pattern.data.len();
-                self.compare_shifted_plaintext(
-                    str,
-                    &pattern,
-                    diff,
-                    diff,
-                )
+                self.compare_shifted_plaintext(str, &pattern, diff, diff)
             }
             GenericPattern::Enc(pattern) => {
                 if str.bytes.len() < pattern.bytes.len() {
                     return self.key.create_trivial_boolean_block(false);
                 }
                 let diff = str.bytes.len() - pattern.bytes.len();
-                self.compare_shifted(
-                    str,
-                    &pattern,
-                    diff,
-                    diff,
-                )
+                self.compare_shifted(str, &pattern, diff, diff)
             }
         }
     }
