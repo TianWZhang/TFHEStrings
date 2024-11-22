@@ -1,5 +1,5 @@
 use super::ServerKey;
-use crate::fhe_string::{FheString, GenericPattern, PlaintextString, NUM_BLOCKS};
+use crate::fhe_string::{FheString, GenericPattern, PlaintextString};
 use tfhe::integer::{prelude::ServerKeyDefaultCMux, BooleanBlock, RadixCiphertext};
 
 impl ServerKey {
@@ -14,7 +14,8 @@ impl ServerKey {
     ) -> (RadixCiphertext, BooleanBlock) {
         let mut res = self.key.create_trivial_boolean_block(false);
         // We consider the index as u32.
-        let mut last_match_index = self.key.create_trivial_zero_radix(4 * NUM_BLOCKS);
+        let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
+        let mut last_match_index = self.key.create_trivial_zero_radix(num_blocks);
 
         let matched: Vec<_> = range
             .map(|start| {
@@ -26,7 +27,7 @@ impl ServerKey {
             .collect();
 
         for (i, is_matched) in matched {
-            let index = self.key.create_trivial_radix(i as u32, 4 * NUM_BLOCKS);
+            let index = self.key.create_trivial_radix(i as u32, num_blocks);
             rayon::join(
                 || {
                     last_match_index =
@@ -36,6 +37,7 @@ impl ServerKey {
                 || self.key.boolean_bitor_assign(&mut res, &is_matched),
             );
         }
+        last_match_index = self.key.if_then_else_parallelized(&res, &last_match_index, &self.key.create_trivial_radix(str.bytes.len() as u32, num_blocks));
         (last_match_index, res)
     }
 
@@ -46,7 +48,8 @@ impl ServerKey {
         range: impl Iterator<Item = usize>,
     ) -> (RadixCiphertext, BooleanBlock) {
         let mut res = self.key.create_trivial_boolean_block(false);
-        let mut last_match_index = self.key.create_trivial_zero_radix(4 * NUM_BLOCKS);
+        let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
+        let mut last_match_index = self.key.create_trivial_zero_radix(num_blocks);
         let matched: Vec<_> = range
             .map(|start| {
                 let substr = &str.clone().bytes[start..];
@@ -56,7 +59,7 @@ impl ServerKey {
             .collect();
 
         for (i, is_matched) in matched {
-            let index = self.key.create_trivial_radix(i as u32, 4 * NUM_BLOCKS);
+            let index = self.key.create_trivial_radix(i as u32, num_blocks);
             rayon::join(
                 || {
                     last_match_index =
@@ -66,6 +69,7 @@ impl ServerKey {
                 || self.key.boolean_bitor_assign(&mut res, &is_matched),
             );
         }
+        last_match_index = self.key.if_then_else_parallelized(&res, &last_match_index, &self.key.create_trivial_radix(str.bytes.len() as u32, num_blocks));
         (last_match_index, res)
     }
 
@@ -136,20 +140,30 @@ mod tests {
     #[test]
     fn test_find() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
-        let (haystack, needle) = ("ell", "l");
 
+        let (haystack, needle) = ("ell", "e");
         let enc_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);
         let enc_needle = GenericPattern::Enc(FheString::encrypt(
             PlaintextString::new(needle.to_string()),
             &ck,
         ));
-
         let (index, found) = sk.find(&enc_haystack, &enc_needle);
         let index = ck.key.decrypt_radix::<u32>(&index);
         let found = ck.key.decrypt_bool(&found);
-
         assert!(found);
-        assert_eq!(index, 1);
+        assert_eq!(index, 0);
+
+        let (haystack, needle) = ("ell", "le");
+        let enc_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);
+        let enc_needle = GenericPattern::Enc(FheString::encrypt(
+            PlaintextString::new(needle.to_string()),
+            &ck,
+        ));
+        let (index, found) = sk.find(&enc_haystack, &enc_needle);
+        let index = ck.key.decrypt_radix::<u32>(&index);
+        let found = ck.key.decrypt_bool(&found);
+        assert!(!found);
+        assert_eq!(index, 3);
     }
 
     #[test]

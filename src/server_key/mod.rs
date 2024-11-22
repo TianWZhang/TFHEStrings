@@ -13,6 +13,7 @@ use crate::{
 
 pub mod contains;
 pub mod find;
+pub mod split;
 pub mod strip;
 pub mod trim;
 
@@ -88,6 +89,23 @@ impl ServerKey {
         }
     }
 
+    fn pad_or_trim_ciphertext(&self, cipher: &mut RadixCiphertext, len: usize) {
+        let cipher_len = cipher.blocks().len();
+
+        match cipher_len.cmp(&len) {
+            Ordering::Less => {
+                let diff = len - cipher_len;
+                self.key
+                    .extend_radix_with_trivial_zero_blocks_msb_assign(cipher, diff);
+            }
+            Ordering::Greater => {
+                let diff = cipher_len - len;
+                self.key.trim_radix_blocks_msb_assign(cipher, diff);
+            }
+            _ => (),
+        }
+    }
+
     fn fhestrings_eq(&self, lhs: &[RadixCiphertext], rhs: &[RadixCiphertext]) -> BooleanBlock {
         let blocks_lhs = lhs
             .into_iter()
@@ -139,6 +157,46 @@ impl ServerKey {
             .key
             .if_then_else_parallelized(condition, &true_ct_uint, &false_ct_uint);
         FheString::from_uint(res_uint)
+    }
+
+    fn left_shift_chars(&self, str: &FheString, shift: &RadixCiphertext) -> FheString {
+        let uint = str.to_uint(self);
+        let mut shift_bits = self.key.scalar_left_shift_parallelized(shift, 3);
+        // `shift_bits` needs to have the same number of blocks as `uint` for tfhe.rs shift operations
+        self.pad_or_trim_ciphertext(&mut shift_bits, uint.blocks().len());
+
+        let shifted_uint = self.key.left_shift_parallelized(&uint, &shift_bits);
+
+        // If the shifting amount is >= the length of str, the result is 0, instead of wrapping
+        // as in Rust and thfe.rs.
+        let shift_ge_str_len = self
+            .key
+            .scalar_ge_parallelized(shift, str.bytes.len() as u32);
+        FheString::from_uint(self.key.if_then_else_parallelized(
+            &shift_ge_str_len,
+            &self.key.create_trivial_zero_radix(uint.blocks().len()),
+            &shifted_uint,
+        ))
+    }
+
+    fn right_shift_chars(&self, str: &FheString, shift: &RadixCiphertext) -> FheString {
+        let uint = str.to_uint(self);
+        let mut shift_bits = self.key.scalar_left_shift_parallelized(shift, 3);
+        // `shift_bits` needs to have the same number of blocks as `uint` for tfhe.rs shift operations
+        self.pad_or_trim_ciphertext(&mut shift_bits, uint.blocks().len());
+
+        let shifted_uint = self.key.right_shift_parallelized(&uint, &shift_bits);
+
+        // If the shifting amount is >= the length of str, the result is 0, instead of wrapping
+        // as in Rust and thfe.rs.
+        let shift_ge_str_len = self
+            .key
+            .scalar_ge_parallelized(shift, str.bytes.len() as u32);
+        FheString::from_uint(self.key.if_then_else_parallelized(
+            &shift_ge_str_len,
+            &self.key.create_trivial_zero_radix(uint.blocks().len()),
+            &shifted_uint,
+        ))
     }
 
     pub fn eq(&self, lhs: &FheString, rhs: &GenericPattern) -> BooleanBlock {
@@ -319,15 +377,30 @@ impl AsRef<TfheServerKey> for ServerKey {
     }
 }
 
+pub trait FheStringIterator {
+    fn next(&mut self, sk: &ServerKey) -> FheString;
+}
+
 #[cfg(test)]
 mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
     use crate::{
         client_key::U16Arg,
-        fhe_string::{FheString, GenericPattern, PlaintextString},
+        fhe_string::{FheString, GenericPattern, PlaintextString, NUM_BLOCKS},
         generate_keys,
     };
+
+    #[test]
+    fn test_left_shift_chars() {
+        let s = "aff";
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
+        let shift = sk.key.create_trivial_radix(4, NUM_BLOCKS);
+        let fhe_left_shift = sk.left_shift_chars(&fhe_s, &shift);
+        let s_left_shift = fhe_left_shift.decrypt(&ck);
+        assert_eq!(s_left_shift, "");
+    }
 
     #[test]
     fn test_to_lowercase() {

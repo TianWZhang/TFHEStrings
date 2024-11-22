@@ -1,8 +1,64 @@
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use tfhe::integer::{prelude::ServerKeyDefaultCMux, BooleanBlock, RadixCiphertext};
 
 use crate::fhe_string::{FheString, NUM_BLOCKS};
 
-use super::ServerKey;
+use super::{FheStringIterator, ServerKey};
+
+pub struct SplitAsciiWhitespace {
+    state: FheString,
+}
+
+impl FheStringIterator for SplitAsciiWhitespace {
+    fn next(&mut self, sk: &ServerKey) -> FheString {
+        let str_len = self.state.bytes.len();
+        if str_len == 0 || (self.state.padded && str_len == 1) {
+            return FheString::empty();
+        }
+
+        // create the mask
+        let mut mask = self.state.clone();
+        let mut prev_is_ws = sk.key.create_trivial_boolean_block(false);
+        for enc_c in &mut mask.bytes {
+            let mut is_ws = sk.is_whitespace(enc_c, false);
+            sk.key.boolean_bitor_assign(&mut is_ws, &prev_is_ws);
+            let mut is_ws_u8 = is_ws.clone().into_radix(NUM_BLOCKS, &sk.key);
+            // if is_ws_u8 is an encryption of 1, then we set the mask to 0
+            // if is_ws_u8 is an encryption of 0, then we set the mask to 255u8
+            sk.key.scalar_sub_assign_parallelized(&mut is_ws_u8, 1);
+            *enc_c = is_ws_u8;
+            prev_is_ws = is_ws;
+        }
+
+        // apply the mask to obtain the next item
+        // Inplace operation is necessary here, otherwise parallel iterator will not guarantee the order of
+        // the elements in the resulting vector.
+        let mut enc_item_bytes = self.state.clone().bytes;
+        enc_item_bytes
+            .iter_mut()
+            .zip(mask.bytes.iter())
+            .par_bridge()
+            .for_each(|(enc_c, mask_u8)| sk.key.bitand_assign_parallelized(enc_c, mask_u8));
+        let enc_item = FheString {
+            bytes: enc_item_bytes,
+            padded: self.state.padded,
+        };
+
+        // update state
+        // item_len is `u32`
+        let mut enc_item_len = sk.key.create_trivial_zero_radix(
+            32 / ((((sk.key.message_modulus().0) as f64).log2()) as usize),
+        );
+        for enc_c in &mask.bytes {
+            let not_zero = sk.key.scalar_ne_parallelized(enc_c, 0u8);
+            sk.key
+                .add_assign_parallelized(&mut enc_item_len, &not_zero.into_radix(1, &sk.key));
+        }
+        let state_shift = sk.left_shift_chars(&self.state, &enc_item_len);
+        self.state = sk.trim_start(&state_shift);
+        enc_item
+    }
+}
 
 impl ServerKey {
     fn is_whitespace(&self, c: &RadixCiphertext, or_null: bool) -> BooleanBlock {
@@ -95,13 +151,29 @@ impl ServerKey {
         let res = self.trim_start(str);
         self.trim_end(&res)
     }
+
+    /// Creates an iterator over the substrings of this encrypted string, separated by any amount of
+    /// whitespace.
+    ///
+    /// Each call to `next` on the iterator returns a tuple with the next encrypted substring and a
+    /// boolean indicating `Some` (true) or `None` (false) when no more substrings are available.
+    ///
+    /// When the boolean is `true`, the iterator will yield non-empty encrypted substrings. When the
+    /// boolean is `false`, the returned encrypted string is always empty.
+    pub fn split_ascii_whitespace(&self, str: &FheString) -> SplitAsciiWhitespace {
+        SplitAsciiWhitespace { state: str.clone() }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
-    use crate::{fhe_string::{FheString, PlaintextString}, generate_keys};
+    use crate::{
+        fhe_string::{FheString, PlaintextString},
+        generate_keys,
+        server_key::FheStringIterator,
+    };
 
     #[test]
     fn test_trim_start() {
@@ -128,5 +200,25 @@ mod tests {
         let enc_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let enc_res = sk.trim(&enc_s);
         assert_eq!(enc_res.decrypt(&ck).as_str(), "hello world");
+    }
+
+    #[test]
+    fn test_split_ascii_whitespace() {
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let s = "hello \t\nworld";
+        let enc_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
+        let mut iter = sk.split_ascii_whitespace(&enc_s);
+
+        let enc_first_item = iter.next(&sk);
+        let first_item = enc_first_item.decrypt(&ck);
+        assert_eq!(first_item.as_str(), "hello");
+
+        let enc_second_item = iter.next(&sk);
+        let second_item = enc_second_item.decrypt(&ck);
+        assert_eq!(second_item.as_str(), "world");
+
+        let enc_third_item = iter.next(&sk);
+        let third_item = enc_third_item.decrypt(&ck);
+        assert_eq!(third_item.as_str(), "");
     }
 }

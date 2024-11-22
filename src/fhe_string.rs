@@ -32,6 +32,7 @@ impl FheString {
             .map(|b| ck.key.decrypt_radix(b))
             .filter(|b| *b != 0)
             .collect();
+        println!("bytes: {:?}", bytes);
         String::from_utf8(bytes).unwrap()
     }
 
