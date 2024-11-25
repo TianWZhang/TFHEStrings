@@ -267,10 +267,7 @@ impl ServerKey {
                 self.key.add_parallelized(c, &up_lower_dist)
             })
             .collect();
-        FheString {
-            bytes: res,
-            padded: str.padded,
-        }
+        FheString { bytes: res }
     }
 
     pub fn to_uppercase(&self, str: &FheString) -> FheString {
@@ -289,10 +286,7 @@ impl ServerKey {
                 self.key.sub_parallelized(c, &up_lower_dist)
             })
             .collect();
-        FheString {
-            bytes: res,
-            padded: str.padded,
-        }
+        FheString { bytes: res }
     }
 
     /// Returns `true` if an encrypted string and a pattern (either encrypted or clear) are equal,
@@ -319,8 +313,10 @@ impl ServerKey {
         str.bytes.len()
     }
 
-    pub fn is_empty(&self, str: &FheString) -> bool {
-        str.bytes.is_empty()
+    /// Returns whether an encrypted string is empty or not.
+    pub fn is_empty(&self, str: &FheString) -> BooleanBlock {
+        let uint = str.to_uint(self);
+        self.key.scalar_eq_parallelized(&uint, 0u8)
     }
 
     /// Concatenates two encrypted strings and returns the result as a new encrypted string.
@@ -329,10 +325,7 @@ impl ServerKey {
     pub fn concat(&self, lhs: &FheString, rhs: &FheString) -> FheString {
         let mut res = lhs.bytes.clone();
         res.extend_from_slice(&rhs.bytes);
-        FheString {
-            bytes: res,
-            padded: lhs.padded || rhs.padded,
-        }
+        FheString { bytes: res }
     }
 
     /// Returns a new encrypted string which is the original encrypted string repeated `n` times.
@@ -345,7 +338,7 @@ impl ServerKey {
         }
 
         let str_len = str.bytes.len();
-        if str_len == 0 || (str.padded && str_len == 1) {
+        if str_len == 0 {
             return FheString::empty();
         }
 
@@ -378,7 +371,7 @@ impl AsRef<TfheServerKey> for ServerKey {
 }
 
 pub trait FheStringIterator {
-    fn next(&mut self, sk: &ServerKey) -> FheString;
+    fn next(&mut self, sk: &ServerKey) -> (FheString, BooleanBlock);
 }
 
 #[cfg(test)]

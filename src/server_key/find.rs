@@ -37,7 +37,13 @@ impl ServerKey {
                 || self.key.boolean_bitor_assign(&mut res, &is_matched),
             );
         }
-        last_match_index = self.key.if_then_else_parallelized(&res, &last_match_index, &self.key.create_trivial_radix(str.bytes.len() as u32, num_blocks));
+        last_match_index = self.key.if_then_else_parallelized(
+            &res,
+            &last_match_index,
+            &self
+                .key
+                .create_trivial_radix(str.bytes.len() as u32, num_blocks),
+        );
         (last_match_index, res)
     }
 
@@ -69,7 +75,13 @@ impl ServerKey {
                 || self.key.boolean_bitor_assign(&mut res, &is_matched),
             );
         }
-        last_match_index = self.key.if_then_else_parallelized(&res, &last_match_index, &self.key.create_trivial_radix(str.bytes.len() as u32, num_blocks));
+        last_match_index = self.key.if_then_else_parallelized(
+            &res,
+            &last_match_index,
+            &self
+                .key
+                .create_trivial_radix(str.bytes.len() as u32, num_blocks),
+        );
         (last_match_index, res)
     }
 
@@ -87,15 +99,32 @@ impl ServerKey {
         str: &FheString,
         pattern: &GenericPattern,
     ) -> (RadixCiphertext, BooleanBlock) {
+        let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
         match pattern {
             GenericPattern::Enc(pat) => {
+                if str.bytes.len() < pat.bytes.len() {
+                    return (
+                        self.key
+                            .create_trivial_radix(str.bytes.len() as u32, num_blocks),
+                        self.key.create_trivial_boolean_block(false),
+                    );
+                }
                 self.compare_shifted_index(str, pat, 0..=(str.bytes.len() - pat.bytes.len()))
             }
-            GenericPattern::Clear(pat) => self.compare_shifted_index_plaintext(
-                str,
-                pat,
-                0..=(str.bytes.len() - pat.data.len()),
-            ),
+            GenericPattern::Clear(pat) => {
+                if str.bytes.len() < pat.data.len() {
+                    return (
+                        self.key
+                            .create_trivial_radix(str.bytes.len() as u32, num_blocks),
+                        self.key.create_trivial_boolean_block(false),
+                    );
+                }
+                self.compare_shifted_index_plaintext(
+                    str,
+                    pat,
+                    0..=(str.bytes.len() - pat.data.len()),
+                )
+            }
         }
     }
 
@@ -113,17 +142,36 @@ impl ServerKey {
         str: &FheString,
         pattern: &GenericPattern,
     ) -> (RadixCiphertext, BooleanBlock) {
+        let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
         match pattern {
-            GenericPattern::Enc(pat) => self.compare_shifted_index(
-                str,
-                pat,
-                (0..=(str.bytes.len() - pat.bytes.len())).rev(),
-            ),
-            GenericPattern::Clear(pat) => self.compare_shifted_index_plaintext(
-                str,
-                pat,
-                (0..=(str.bytes.len() - pat.data.len())).rev(),
-            ),
+            GenericPattern::Enc(pat) => {
+                if str.bytes.len() < pat.bytes.len() {
+                    return (
+                        self.key
+                            .create_trivial_radix(str.bytes.len() as u32, num_blocks),
+                        self.key.create_trivial_boolean_block(false),
+                    );
+                }
+                self.compare_shifted_index(
+                    str,
+                    pat,
+                    (0..=(str.bytes.len() - pat.bytes.len())).rev(),
+                )
+            }
+            GenericPattern::Clear(pat) => {
+                if str.bytes.len() < pat.data.len() {
+                    return (
+                        self.key
+                            .create_trivial_radix(str.bytes.len() as u32, num_blocks),
+                        self.key.create_trivial_boolean_block(false),
+                    );
+                }
+                self.compare_shifted_index_plaintext(
+                    str,
+                    pat,
+                    (0..=(str.bytes.len() - pat.data.len())).rev(),
+                )
+            }
         }
     }
 }

@@ -10,7 +10,6 @@ pub const NUM_BLOCKS: usize = 4;
 #[derive(Clone)]
 pub struct FheString {
     pub(crate) bytes: Vec<RadixCiphertext>,
-    pub(crate) padded: bool,
 }
 
 impl FheString {
@@ -19,10 +18,7 @@ impl FheString {
             .bytes()
             .map(|b| ck.key.encrypt_radix(b, NUM_BLOCKS))
             .collect();
-        Self {
-            bytes,
-            padded: false,
-        }
+        Self { bytes }
     }
 
     pub fn decrypt(&self, ck: &ClientKey) -> String {
@@ -32,7 +28,6 @@ impl FheString {
             .map(|b| ck.key.decrypt_radix(b))
             .filter(|b| *b != 0)
             .collect();
-        println!("bytes: {:?}", bytes);
         String::from_utf8(bytes).unwrap()
     }
 
@@ -43,17 +38,11 @@ impl FheString {
             .bytes()
             .map(|b| server_key.key.create_trivial_radix(b, NUM_BLOCKS))
             .collect();
-        Self {
-            bytes,
-            padded: false,
-        }
+        Self { bytes }
     }
 
     pub fn empty() -> Self {
-        Self {
-            bytes: vec![],
-            padded: false,
-        }
+        Self { bytes: vec![] }
     }
 
     // Converts a `FheString` to a `RadixCiphertext`, taking 4 blocks for each `FheAsciiChar`.
@@ -92,11 +81,7 @@ impl FheString {
             .map(|chuck| RadixCiphertext::from_blocks(chuck.iter().rev().cloned().collect()))
             .collect();
 
-        Self {
-            bytes,
-            // We are assuming here there's no padding, so this isn't safe if we don't know it!
-            padded: false,
-        }
+        Self { bytes }
     }
 }
 

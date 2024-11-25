@@ -10,10 +10,10 @@ pub struct SplitAsciiWhitespace {
 }
 
 impl FheStringIterator for SplitAsciiWhitespace {
-    fn next(&mut self, sk: &ServerKey) -> FheString {
+    fn next(&mut self, sk: &ServerKey) -> (FheString, BooleanBlock) {
         let str_len = self.state.bytes.len();
-        if str_len == 0 || (self.state.padded && str_len == 1) {
-            return FheString::empty();
+        if str_len == 0 {
+            return (FheString::empty(), sk.key.create_trivial_boolean_block(false));
         }
 
         // create the mask
@@ -41,7 +41,6 @@ impl FheStringIterator for SplitAsciiWhitespace {
             .for_each(|(enc_c, mask_u8)| sk.key.bitand_assign_parallelized(enc_c, mask_u8));
         let enc_item = FheString {
             bytes: enc_item_bytes,
-            padded: self.state.padded,
         };
 
         // update state
@@ -56,7 +55,9 @@ impl FheStringIterator for SplitAsciiWhitespace {
         }
         let state_shift = sk.left_shift_chars(&self.state, &enc_item_len);
         self.state = sk.trim_start(&state_shift);
-        enc_item
+
+        let enc_is_empty = sk.is_empty(&enc_item);
+        (enc_item, sk.key.boolean_bitnot(&enc_is_empty))
     }
 }
 
@@ -115,15 +116,12 @@ impl ServerKey {
                 new_c
             })
             .collect();
-        FheString {
-            bytes,
-            padded: false,
-        }
+        FheString { bytes }
     }
 
     /// Returns a new encrypted string with whitespace removed from the start.
     pub fn trim_start(&self, str: &FheString) -> FheString {
-        if str.bytes.is_empty() || (str.padded && str.bytes.len() == 1) {
+        if str.bytes.is_empty() {
             return str.clone();
         }
         self.compare_trim(&str.bytes, false)
@@ -131,21 +129,18 @@ impl ServerKey {
 
     /// Returns a new encrypted string with whitespace removed from the end.
     pub fn trim_end(&self, str: &FheString) -> FheString {
-        if str.bytes.is_empty() || (str.padded && str.bytes.len() == 1) {
+        if str.bytes.is_empty() {
             return str.clone();
         }
         let bytes: Vec<_> = str.bytes.iter().rev().cloned().collect();
-        let mut bytes = self.compare_trim(&bytes, str.padded).bytes;
+        let mut bytes = self.compare_trim(&bytes, false).bytes;
         bytes.reverse();
-        FheString {
-            bytes,
-            padded: str.padded,
-        }
+        FheString { bytes }
     }
 
     /// Returns a new encrypted string with whitespace removed from both the start and end.
     pub fn trim(&self, str: &FheString) -> FheString {
-        if str.bytes.is_empty() || (str.padded && str.bytes.len() == 1) {
+        if str.bytes.is_empty() {
             return str.clone();
         }
         let res = self.trim_start(str);
@@ -161,7 +156,9 @@ impl ServerKey {
     /// When the boolean is `true`, the iterator will yield non-empty encrypted substrings. When the
     /// boolean is `false`, the returned encrypted string is always empty.
     pub fn split_ascii_whitespace(&self, str: &FheString) -> SplitAsciiWhitespace {
-        SplitAsciiWhitespace { state: str.clone() }
+        SplitAsciiWhitespace {
+            state: self.trim(str),
+        }
     }
 }
 
@@ -205,19 +202,23 @@ mod tests {
     #[test]
     fn test_split_ascii_whitespace() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
-        let s = "hello \t\nworld";
+
+        // " hello \t\nworld \n".split_ascii_whitespace().collect() will yield ["hello", "world"]
+        // " hello \t\nworld \n".split(" ").collect() will yield ["", "hello", "\t\nworld", "\n"]
+        // "hello".find("") is Some(0)
+        let s = " hello \t\nworld \n";
         let enc_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let mut iter = sk.split_ascii_whitespace(&enc_s);
 
-        let enc_first_item = iter.next(&sk);
+        let (enc_first_item, _) = iter.next(&sk);
         let first_item = enc_first_item.decrypt(&ck);
         assert_eq!(first_item.as_str(), "hello");
 
-        let enc_second_item = iter.next(&sk);
+        let (enc_second_item, _) = iter.next(&sk);
         let second_item = enc_second_item.decrypt(&ck);
         assert_eq!(second_item.as_str(), "world");
 
-        let enc_third_item = iter.next(&sk);
+        let (enc_third_item, _) = iter.next(&sk);
         let third_item = enc_third_item.decrypt(&ck);
         assert_eq!(third_item.as_str(), "");
     }
