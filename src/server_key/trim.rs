@@ -13,7 +13,10 @@ impl FheStringIterator for SplitAsciiWhitespace {
     fn next(&mut self, sk: &ServerKey) -> (FheString, BooleanBlock) {
         let str_len = self.state.bytes.len();
         if str_len == 0 {
-            return (FheString::empty(), sk.key.create_trivial_boolean_block(false));
+            return (
+                FheString::empty(),
+                sk.key.create_trivial_boolean_block(false),
+            );
         }
 
         // create the mask
