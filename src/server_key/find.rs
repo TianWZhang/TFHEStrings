@@ -12,7 +12,7 @@ impl ServerKey {
         pattern: &FheString,
         range: impl Iterator<Item = usize>,
     ) -> (RadixCiphertext, BooleanBlock) {
-        let mut res = self.key.create_trivial_boolean_block(false);
+        let mut is_found = self.key.create_trivial_boolean_block(false);
         // We consider the index as u32.
         let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
         let mut last_match_index = self.key.create_trivial_zero_radix(num_blocks);
@@ -34,17 +34,17 @@ impl ServerKey {
                         self.key
                             .if_then_else_parallelized(&is_matched, &index, &last_match_index);
                 },
-                || self.key.boolean_bitor_assign(&mut res, &is_matched),
+                || self.key.boolean_bitor_assign(&mut is_found, &is_matched),
             );
         }
         last_match_index = self.key.if_then_else_parallelized(
-            &res,
+            &is_found,
             &last_match_index,
             &self
                 .key
                 .create_trivial_radix(str.bytes.len() as u32, num_blocks),
         );
-        (last_match_index, res)
+        (last_match_index, is_found)
     }
 
     fn compare_shifted_index_plaintext(
