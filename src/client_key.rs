@@ -10,11 +10,13 @@ pub struct ClientKey {
 }
 
 /// Encrypted `u16` type. It contains an optional `max` to restrict the range of the value.
+#[derive(Clone)]
 pub struct FheU16 {
     pub(crate) cipher: RadixCiphertext,
     pub(crate) max: Option<u16>,
 }
 
+#[derive(Clone)]
 pub enum U16Arg {
     Clear(u16),
     Enc(FheU16),

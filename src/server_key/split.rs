@@ -1,6 +1,9 @@
 use tfhe::integer::{prelude::ServerKeyDefaultCMux, BooleanBlock, RadixCiphertext};
 
-use crate::fhe_string::{FheString, GenericPattern};
+use crate::{
+    client_key::U16Arg,
+    fhe_string::{FheString, GenericPattern},
+};
 
 use super::{FheStringIterator, ServerKey};
 
@@ -20,6 +23,12 @@ pub struct Split {
     counter_le_max: BooleanBlock,
 }
 
+pub struct SplitN {
+    internal: Split,
+    n: U16Arg,
+    not_exceeded: BooleanBlock,
+}
+
 pub struct SplitNoTrailing {
     internal: Split,
 }
@@ -27,7 +36,7 @@ pub struct SplitNoTrailing {
 pub struct SplitNoLeading {
     internal: Split,
     prev_return: (FheString, BooleanBlock),
-    leading_empty_str: BooleanBlock
+    leading_empty_str: BooleanBlock,
 }
 
 impl FheStringIterator for Split {
@@ -110,7 +119,8 @@ impl FheStringIterator for SplitNoTrailing {
         let not_trailling_empty = sk.key.boolean_bitnot(&trailing_empty);
         // If there's no empty trailing string we get the previous `is_some`,
         // else we get false (None)
-        sk.key.boolean_bitand_assign(&mut is_some, &not_trailling_empty);
+        sk.key
+            .boolean_bitand_assign(&mut is_some, &not_trailling_empty);
         (res, is_some)
     }
 }
@@ -121,10 +131,54 @@ impl FheStringIterator for SplitNoLeading {
         let (res, is_some) = self.internal.next(sk);
         let (return_res, return_is_some) = rayon::join(
             || sk.conditional_fhestring(&self.leading_empty_str, &res, &self.prev_return.0),
-            || sk.key.if_then_else_parallelized(&self.leading_empty_str, &is_some, &self.prev_return.1)
+            || {
+                sk.key.if_then_else_parallelized(
+                    &self.leading_empty_str,
+                    &is_some,
+                    &self.prev_return.1,
+                )
+            },
         );
         self.prev_return = (res, is_some);
         (return_res, return_is_some)
+    }
+}
+
+impl FheStringIterator for SplitN {
+    fn next(&mut self, sk: &ServerKey) -> (FheString, BooleanBlock) {
+        let state = self.internal.state.clone();
+        let (mut res, mut is_some) = self.internal.next(sk);
+        // This keeps the original `is_some` value unless we have exceeded n
+        sk.key
+            .boolean_bitand_assign(&mut is_some, &self.not_exceeded);
+
+        match &self.n {
+            U16Arg::Clear(n) => {
+                // The moment counter is at least one less than n, we return the remaining state
+                // and set `not_exceeded` to false.
+                if self.internal.counter >= *n - 1 {
+                    res = state;
+                    self.not_exceeded = sk.key.create_trivial_boolean_block(false);
+                }
+            }
+            U16Arg::Enc(n) => {
+                // Note that when `enc_n` is zero `n_minus_one` wraps to a very large number and so
+                // `exceeded` will be false. Nonetheless the initial value of `not_exceeded`
+                // was set to false in the n is zero case, so we return None.
+                let n_minus_one = sk.key.scalar_sub_parallelized(&n.cipher, 1);
+                let cur_not_exceeded = sk
+                    .key
+                    .scalar_gt_parallelized(&n_minus_one, self.internal.counter);
+                rayon::join(
+                    || res = sk.conditional_fhestring(&cur_not_exceeded, &res, &state),
+                    || {
+                        sk.key
+                            .boolean_bitand_assign(&mut self.not_exceeded, &cur_not_exceeded)
+                    },
+                );
+            }
+        }
+        (res, is_some)
     }
 }
 
@@ -341,6 +395,67 @@ impl ServerKey {
             leading_empty_str,
         }
     }
+
+    fn splitn_internal(
+        &self,
+        str: &FheString,
+        pat: &GenericPattern,
+        n: &U16Arg,
+        split_type: SplitType,
+    ) -> SplitN {
+        let n_not_0 = match n {
+            U16Arg::Clear(n) => self.key.create_trivial_boolean_block(*n != 0),
+            U16Arg::Enc(n) => self.key.scalar_ne_parallelized(&n.cipher, 0),
+        };
+
+        let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
+        let max_counter = self
+            .key
+            .create_trivial_radix(str.bytes.len() as u32, num_blocks);
+        let internal = Split {
+            split_type,
+            state: str.clone(),
+            pat: pat.clone(),
+            prev_was_some: self.key.create_trivial_boolean_block(true),
+            counter: 0,
+            max_counter,
+            counter_le_max: self.key.create_trivial_boolean_block(true),
+        };
+        SplitN {
+            internal,
+            n: n.clone(),
+            not_exceeded: n_not_0,
+        }
+    }
+
+    /// Creates an iterator of encrypted substrings by splitting the original encrypted string based
+    /// on a specified pattern (either encrypted or clear), limited to at most `n` results.
+    ///
+    /// The `n` is specified by a `U16Arg`, which can be either `Clear` or `Enc`. The iterator, of
+    /// type `SplitN`, can be used to sequentially retrieve the substrings. Each call to `next` on
+    /// the iterator returns a tuple with the next split substring as an encrypted string and a
+    /// boolean indicating `Some` (true) or `None` (false).
+    ///
+    /// The pattern to search for can be specified as either `GenericPattern::Clear` for a clear
+    /// string or `GenericPattern::Enc` for an encrypted string.
+    pub fn splitn(&self, str: &FheString, pat: &GenericPattern, n: &U16Arg) -> SplitN {
+        self.splitn_internal(str, pat, n, SplitType::SplitT)
+    }
+
+    /// Creates an iterator of encrypted substrings by splitting the original encrypted string from
+    /// the end based on a specified pattern (either encrypted or clear), limited to at most `n`
+    /// results.
+    ///
+    /// The `n` is specified by a `U16Arg`, which can be either `Clear` or `Enc`. The iterator, of
+    /// type `RSplitN`, can be used to sequentially retrieve the substrings in reverse order. Each
+    /// call to `next` on the iterator returns a tuple with the next split substring as an encrypted
+    /// string and a boolean indicating `Some` (true) or `None` (false).
+    ///
+    /// The pattern to search for can be specified as either `GenericPattern::Clear` for a clear
+    /// string or `GenericPattern::Enc` for an encrypted string.
+    pub fn rsplitn(&self, str: &FheString, pat: &GenericPattern, n: &U16Arg) -> SplitN {
+        self.splitn_internal(str, pat, n, SplitType::RSplitT)
+    }
 }
 
 #[cfg(test)]
@@ -348,6 +463,7 @@ mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
     use crate::{
+        client_key::U16Arg,
         fhe_string::{FheString, GenericPattern, PlaintextString},
         generate_keys,
         server_key::FheStringIterator,
@@ -393,7 +509,6 @@ mod tests {
 
     #[test]
     fn test_rsplit_once_non_occurred() {
-        println!("{:?}", "hello".rfind(""));
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
         let (s, pat) = ("h", "xx");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
@@ -435,7 +550,6 @@ mod tests {
 
         // ["", "h", "e", "l", ""]
         let (s, pat) = ("hel", "");
-
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_pat = GenericPattern::Enc(FheString::encrypt(
             PlaintextString::new(pat.to_string()),
@@ -597,5 +711,53 @@ mod tests {
         let (_, enc_fourth_is_some) = iter.next(&sk);
         let fourth_is_some = ck.key.decrypt_bool(&enc_fourth_is_some);
         assert!(!fourth_is_some);
+    }
+
+    #[test]
+    fn test_splitn() {
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+
+        let (s, pat) = ("h el", " ");
+        let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
+        let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
+        let n = U16Arg::Clear(1);
+        let mut iter = sk.splitn(&fhe_s, &fhe_pat, &n);
+
+        let (enc_first_item, enc_first_is_some) = iter.next(&sk);
+        let first_item = enc_first_item.decrypt(&ck);
+        let first_is_some = ck.key.decrypt_bool(&enc_first_is_some);
+        assert_eq!(first_item.as_str(), "h el");
+        assert!(first_is_some);
+
+        let (_, enc_second_is_some) = iter.next(&sk);
+        let second_is_some = ck.key.decrypt_bool(&enc_second_is_some);
+        assert!(!second_is_some);
+    }
+
+    #[test]
+    fn test_rsplitn() {
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+
+        let (s, pat) = ("h el", " ");
+        let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
+        let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
+        let n = U16Arg::Enc(ck.encrypt_u16(2, Some(3)));
+        let mut iter = sk.splitn(&fhe_s, &fhe_pat, &n);
+
+        let (enc_first_item, enc_first_is_some) = iter.next(&sk);
+        let first_item = enc_first_item.decrypt(&ck);
+        let first_is_some = ck.key.decrypt_bool(&enc_first_is_some);
+        assert_eq!(first_item.as_str(), "el");
+        assert!(first_is_some);
+
+        let (enc_second_item, enc_second_is_some) = iter.next(&sk);
+        let second_item = enc_second_item.decrypt(&ck);
+        let second_is_some = ck.key.decrypt_bool(&enc_second_is_some);
+        assert_eq!(second_item.as_str(), "h");
+        assert!(!second_is_some);
+
+        let (_, enc_third_is_some) = iter.next(&sk);
+        let third_is_some = ck.key.decrypt_bool(&enc_third_is_some);
+        assert!(!third_is_some);
     }
 }

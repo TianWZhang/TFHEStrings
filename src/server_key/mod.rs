@@ -13,6 +13,7 @@ use crate::{
 
 pub mod contains;
 pub mod find;
+pub mod replace;
 pub mod split;
 pub mod strip;
 pub mod trim;
