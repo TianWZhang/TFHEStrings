@@ -1,8 +1,8 @@
-use std::ops::Deref;
+use std::ops::{Add, Deref};
 
-use tfhe::integer::{IntegerCiphertext, IntegerRadixCiphertext, RadixCiphertext};
+use tfhe::integer::{BooleanBlock, IntegerCiphertext, IntegerRadixCiphertext, RadixCiphertext};
 
-use crate::{client_key::ClientKey, server_key::ServerKey};
+use crate::{client_key::ClientKey, server_key::ServerKey, SERVER_KEY};
 
 pub const N: usize = 4;
 pub const NUM_BLOCKS: usize = 4;
@@ -83,6 +83,41 @@ impl FheString {
 
         Self { bytes }
     }
+
+    pub fn to_uppercase(&self) -> FheString {
+        SERVER_KEY.with(|sk| {
+            let sk = sk.borrow();
+            sk.as_ref().unwrap().to_uppercase(self)
+        })
+    }
+
+    pub fn to_lowercase(&self) -> FheString {
+        SERVER_KEY.with(|sk| {
+            let sk = sk.borrow();
+            sk.as_ref().unwrap().to_lowercase(self)
+        })
+    }
+
+    pub fn find(
+        &self,
+        pattern: &GenericPattern,
+    ) -> (RadixCiphertext, BooleanBlock) {
+        SERVER_KEY.with(|sk| {
+            let sk = sk.borrow();
+            sk.as_ref().unwrap().find(self, pattern)
+        })
+    }
+}
+
+impl Add<&FheString> for FheString {
+    type Output = Self;
+
+    fn add(self, rhs: &FheString) -> Self::Output {
+        SERVER_KEY.with(|sk| {
+            let sk = sk.borrow();
+            sk.as_ref().unwrap().concat(&self, rhs)
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -114,4 +149,23 @@ impl Deref for PlaintextString {
 pub enum GenericPattern {
     Clear(PlaintextString),
     Enc(FheString),
+}
+
+
+#[cfg(test)]
+mod tests {
+    use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
+
+    use crate::{fhe_string::{FheString, PlaintextString}, generate_keys, set_server_key};
+
+    #[test]
+    fn test_to_lowercase() {
+        let s = "AF";
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
+        set_server_key(sk);
+        let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
+        let fhe_s_tolowercase = fhe_s.to_lowercase();
+        let s_tolowercase = fhe_s_tolowercase.decrypt(&ck);
+        assert_eq!(s_tolowercase, s.to_lowercase());
+    }
 }

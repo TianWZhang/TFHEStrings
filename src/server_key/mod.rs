@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn test_left_shift_chars() {
         let s = "aff";
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let shift = sk.key.create_trivial_radix(4, NUM_BLOCKS);
         let fhe_left_shift = sk.left_shift_chars(&fhe_s, &shift);
@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn test_to_lowercase() {
         let s = "AF";
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_s_tolowercase = sk.to_lowercase(&fhe_s);
         let s_tolowercase = fhe_s_tolowercase.decrypt(&ck);
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn test_to_uppercase() {
         let s = "AaBcdE";
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_s_touppercase = sk.to_uppercase(&fhe_s);
         let s_touppercase = fhe_s_touppercase.decrypt(&ck);
@@ -420,7 +420,7 @@ mod tests {
     fn test_to_eq_ignore_case() {
         let s1 = "Hello";
         let s2 = "hello";
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s1 = FheString::encrypt(PlaintextString::new(s1.to_string()), &ck);
         let fhe_s2 = GenericPattern::Enc(FheString::encrypt(
             PlaintextString::new(s2.to_string()),
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn test_lt() {
         let (s1, s2) = ("apple", "banana");
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s1 = FheString::encrypt(PlaintextString::new(s1.to_string()), &ck);
         let fhe_s2 = FheString::encrypt(PlaintextString::new(s2.to_string()), &ck);
         let fhe_res = sk.lt(&fhe_s1, &fhe_s2);
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn test_concat() {
         let (s1, s2) = ("Hello, ", "world!");
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s1 = FheString::encrypt(PlaintextString::new(s1.to_string()), &ck);
         let fhe_s2 = FheString::encrypt(PlaintextString::new(s2.to_string()), &ck);
         let fhe_res = sk.concat(&fhe_s1, &fhe_s2);
@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn test_repeat() {
         let s = "hi";
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         // Using Clear count
         let clear_count = U16Arg::Clear(3);

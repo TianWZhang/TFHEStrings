@@ -23,7 +23,7 @@ pub fn unset_server_key() {
     })
 }
 
-pub fn generate_keys(parameters: ShortintParameterSet) -> (ClientKey, ServerKey) {
+pub fn generate_keys(parameters: impl Into<ShortintParameterSet>) -> (ClientKey, ServerKey) {
     let client_key = ClientKey::new(parameters);
     let server_key = ServerKey::new(&client_key);
     (client_key, server_key)

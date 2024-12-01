@@ -145,7 +145,7 @@ mod tests {
         let s = "AaBcdE";
         let pat1 = "cd";
         let pat2 = "ef";
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_pat1 = GenericPattern::Enc(FheString::encrypt(
             PlaintextString::new(pat1.to_string()),
@@ -174,7 +174,7 @@ mod tests {
     fn test_starts_with() {
         let s = "AaBcdE";
         let pat = "AaB";
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_pat = GenericPattern::Enc(FheString::encrypt(
             PlaintextString::new(pat.to_string()),
@@ -195,7 +195,7 @@ mod tests {
     fn test_ends_with() {
         let s = "AaBcdE";
         let pat = "dH";
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_pat = GenericPattern::Enc(FheString::encrypt(
             PlaintextString::new(pat.to_string()),

@@ -156,19 +156,15 @@ impl FheStringIterator for SplitN {
             U16Arg::Clear(n) => {
                 // The moment counter is at least one less than n, we return the remaining state
                 // and set `not_exceeded` to false.
-                if self.internal.counter >= *n - 1 {
+                if self.internal.counter >= *n {
                     res = state;
                     self.not_exceeded = sk.key.create_trivial_boolean_block(false);
                 }
             }
             U16Arg::Enc(n) => {
-                // Note that when `enc_n` is zero `n_minus_one` wraps to a very large number and so
-                // `exceeded` will be false. Nonetheless the initial value of `not_exceeded`
-                // was set to false in the n is zero case, so we return None.
-                let n_minus_one = sk.key.scalar_sub_parallelized(&n.cipher, 1);
                 let cur_not_exceeded = sk
                     .key
-                    .scalar_gt_parallelized(&n_minus_one, self.internal.counter);
+                    .scalar_gt_parallelized(&n.cipher, self.internal.counter);
                 rayon::join(
                     || res = sk.conditional_fhestring(&cur_not_exceeded, &res, &state),
                     || {
@@ -471,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_split_once_non_occurred() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("hel", "x");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
@@ -490,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_split_once_occurred() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("helelo", "el");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
@@ -509,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_rsplit_once_non_occurred() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let (s, pat) = ("h", "xx");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_pat = GenericPattern::Enc(FheString::encrypt(
@@ -527,7 +523,7 @@ mod tests {
 
     #[test]
     fn test_rsplit_once_occurred() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("helelo", "el");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
@@ -546,7 +542,7 @@ mod tests {
 
     #[test]
     fn test_split_with_empty_pattern() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         // ["", "h", "e", "l", ""]
         let (s, pat) = ("hel", "");
@@ -596,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_split_with_nonempty_pattern() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         // ["hel", ""]
         let (s, pat) = ("hel ", " ");
@@ -625,7 +621,7 @@ mod tests {
 
     #[test]
     fn test_split_inclusive() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("h el ", " ");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
@@ -651,7 +647,7 @@ mod tests {
 
     #[test]
     fn test_split_terminator() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = (" h el ", " ");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
@@ -683,7 +679,7 @@ mod tests {
 
     #[test]
     fn test_rsplit_terminator() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = (" h el ", " ");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
@@ -715,34 +711,49 @@ mod tests {
 
     #[test]
     fn test_splitn() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("h el", " ");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
+
         let n = U16Arg::Clear(1);
         let mut iter = sk.splitn(&fhe_s, &fhe_pat, &n);
-
         let (enc_first_item, enc_first_is_some) = iter.next(&sk);
         let first_item = enc_first_item.decrypt(&ck);
         let first_is_some = ck.key.decrypt_bool(&enc_first_is_some);
         assert_eq!(first_item.as_str(), "h el");
         assert!(first_is_some);
-
         let (_, enc_second_is_some) = iter.next(&sk);
         let second_is_some = ck.key.decrypt_bool(&enc_second_is_some);
         assert!(!second_is_some);
+
+        let n = U16Arg::Enc(ck.encrypt_u16(2, Some(3)));
+        let mut iter = sk.splitn(&fhe_s, &fhe_pat, &n);
+        let (enc_first_item, enc_first_is_some) = iter.next(&sk);
+        let first_item = enc_first_item.decrypt(&ck);
+        let first_is_some = ck.key.decrypt_bool(&enc_first_is_some);
+        assert_eq!(first_item.as_str(), "h");
+        assert!(first_is_some);
+        let (enc_second_item, enc_second_is_some) = iter.next(&sk);
+        let second_item = enc_second_item.decrypt(&ck);
+        let second_is_some = ck.key.decrypt_bool(&enc_second_is_some);
+        assert_eq!(second_item.as_str(), "el");
+        assert!(!second_is_some);
+        let (_, enc_third_is_some) = iter.next(&sk);
+        let third_is_some = ck.key.decrypt_bool(&enc_third_is_some);
+        assert!(!third_is_some);
     }
 
     #[test]
     fn test_rsplitn() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("h el", " ");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
         let n = U16Arg::Enc(ck.encrypt_u16(2, Some(3)));
-        let mut iter = sk.splitn(&fhe_s, &fhe_pat, &n);
+        let mut iter = sk.rsplitn(&fhe_s, &fhe_pat, &n);
 
         let (enc_first_item, enc_first_is_some) = iter.next(&sk);
         let first_item = enc_first_item.decrypt(&ck);

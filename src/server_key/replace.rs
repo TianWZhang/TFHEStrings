@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_replacen() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, from, to) = ("hello", "l", "r");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn test_replace() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, from, to) = ("hello", "l", "r");
         let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);

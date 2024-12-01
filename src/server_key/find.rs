@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_find() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (haystack, needle) = ("ell", "e");
         let enc_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn test_rfind() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let (haystack, needle) = ("ell", "l");
 
         let enc_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);
@@ -231,5 +231,25 @@ mod tests {
 
         assert!(found);
         assert_eq!(index, 2);
+    }
+
+    #[test]
+    fn test_find_trim_start() {
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
+        let (haystack, needle) = ("  h", "h");
+
+        let fhe_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);
+        let fhe_s = sk.trim_start(&fhe_haystack);
+        let fhe_needle = GenericPattern::Enc(FheString::encrypt(
+            PlaintextString::new(needle.to_string()),
+            &ck,
+        ));
+
+        let (index, found) = sk.find(&fhe_s, &fhe_needle);
+        let index = ck.key.decrypt_radix::<u32>(&index);
+        let found = ck.key.decrypt_bool(&found);
+
+        assert!(found);
+        assert_eq!(index, 0);
     }
 }

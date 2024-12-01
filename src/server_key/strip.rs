@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_strip_prefix() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let (haystack, needle) = ("hello", "he");
 
         let enc_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_strip_suffix() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let (haystack, needle) = ("h", "he");
 
         let enc_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);

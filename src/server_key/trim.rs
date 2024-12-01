@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_trim_start() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let s = "  hello world  ";
         let enc_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let enc_res = sk.trim_start(&enc_s);
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_trim_end() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let s = "  hello world  ";
         let enc_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let enc_res = sk.trim_end(&enc_s);
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_trim() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let s = "  hello world  ";
         let enc_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
         let enc_res = sk.trim(&enc_s);
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_split_ascii_whitespace() {
-        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2.into());
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         // " hello \t\nworld \n".split_ascii_whitespace().collect() will yield ["hello", "world"]
         // " hello \t\nworld \n".split(" ").collect() will yield ["", "hello", "\t\nworld", "\n"]
