@@ -2,7 +2,7 @@ use std::ops::{Add, Deref};
 
 use tfhe::integer::{BooleanBlock, IntegerCiphertext, IntegerRadixCiphertext, RadixCiphertext};
 
-use crate::{client_key::ClientKey, server_key::ServerKey, SERVER_KEY};
+use crate::{server_key::ServerKey, SERVER_KEY};
 
 pub const N: usize = 4;
 pub const NUM_BLOCKS: usize = 4;
@@ -10,27 +10,10 @@ pub const NUM_BLOCKS: usize = 4;
 #[derive(Clone)]
 pub struct FheString {
     pub(crate) bytes: Vec<RadixCiphertext>,
+    pub(crate) padded: bool,
 }
 
 impl FheString {
-    pub fn encrypt(string: PlaintextString, ck: &ClientKey) -> Self {
-        let bytes = string
-            .bytes()
-            .map(|b| ck.key.encrypt_radix(b, NUM_BLOCKS))
-            .collect();
-        Self { bytes }
-    }
-
-    pub fn decrypt(&self, ck: &ClientKey) -> String {
-        let bytes = self
-            .bytes
-            .iter()
-            .map(|b| ck.key.decrypt_radix(b))
-            .filter(|b| *b != 0)
-            .collect();
-        String::from_utf8(bytes).unwrap()
-    }
-
     /// Constructs a trivial `FheString` from a plaintext string and a [`ServerKey`].
     /// This only formats the value to fit the ciphertext. The result is NOT encrypted.
     pub fn enc_trivial(str: &str, server_key: &ServerKey) -> Self {
@@ -38,11 +21,17 @@ impl FheString {
             .bytes()
             .map(|b| server_key.key.create_trivial_radix(b, NUM_BLOCKS))
             .collect();
-        Self { bytes }
+        Self {
+            bytes,
+            padded: false,
+        }
     }
 
     pub fn empty() -> Self {
-        Self { bytes: vec![] }
+        Self {
+            bytes: vec![],
+            padded: false,
+        }
     }
 
     // Converts a `FheString` to a `RadixCiphertext`, taking 4 blocks for each `FheAsciiChar`.
@@ -58,13 +47,13 @@ impl FheString {
             .rev()
             .flat_map(|c| c.into_blocks())
             .collect();
-        let mut uint = RadixCiphertext::from_blocks(blocks);
-        if uint.blocks().is_empty() {
+        let mut enc_uint = RadixCiphertext::from_blocks(blocks);
+        if enc_uint.blocks().is_empty() {
             sk.key
-                .extend_radix_with_trivial_zero_blocks_lsb_assign(&mut uint, NUM_BLOCKS);
+                .extend_radix_with_trivial_zero_blocks_lsb_assign(&mut enc_uint, NUM_BLOCKS);
         }
 
-        uint
+        enc_uint
     }
 
     /// Converts a `RadixCiphertext` to a `FheString`, building a `FheAsciiChar` for each `NUM_BLOCKS` blocks.
@@ -81,7 +70,18 @@ impl FheString {
             .map(|chuck| RadixCiphertext::from_blocks(chuck.iter().rev().cloned().collect()))
             .collect();
 
-        Self { bytes }
+        // We are assuming that the string is not padded,
+        // so this isn't safe if we don't know it.
+        Self {
+            bytes,
+            padded: false,
+        }
+    }
+
+    pub fn append_null(&mut self, sk: &ServerKey) {
+        self.bytes
+            .push(sk.key.create_trivial_zero_radix(NUM_BLOCKS));
+        self.padded = true;
     }
 
     pub fn to_uppercase(&self) -> FheString {
@@ -98,10 +98,7 @@ impl FheString {
         })
     }
 
-    pub fn find(
-        &self,
-        pattern: &GenericPattern,
-    ) -> (RadixCiphertext, BooleanBlock) {
+    pub fn find(&self, pattern: &GenericPattern) -> (RadixCiphertext, BooleanBlock) {
         SERVER_KEY.with(|sk| {
             let sk = sk.borrow();
             sk.as_ref().unwrap().find(self, pattern)
@@ -151,21 +148,20 @@ pub enum GenericPattern {
     Enc(FheString),
 }
 
-
 #[cfg(test)]
 mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
-    use crate::{fhe_string::{FheString, PlaintextString}, generate_keys, set_server_key};
+    use crate::{generate_keys, set_server_key};
 
     #[test]
     fn test_to_lowercase() {
         let s = "AF";
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         set_server_key(sk);
-        let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
+        let fhe_s = ck.enc_str(s, 0);
         let fhe_s_tolowercase = fhe_s.to_lowercase();
-        let s_tolowercase = fhe_s_tolowercase.decrypt(&ck);
+        let s_tolowercase = ck.dec_str(&fhe_s_tolowercase);
         assert_eq!(s_tolowercase, s.to_lowercase());
     }
 }

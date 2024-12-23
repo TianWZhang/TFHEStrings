@@ -6,7 +6,7 @@ use crate::fhe_string::{FheString, GenericPattern, PlaintextString, NUM_BLOCKS};
 use super::ServerKey;
 
 impl ServerKey {
-    fn compare_shifted_strip(
+    fn compare_range_strip(
         &self,
         str: &mut FheString,
         pattern: &FheString,
@@ -14,9 +14,11 @@ impl ServerKey {
     ) -> BooleanBlock {
         let mut res = self.key.create_trivial_boolean_block(false);
         for start in range {
-            let substr = &str.clone().bytes[start..];
-            let pattern_slice = &pattern.clone().bytes[..];
-            let is_matched = self.fhestrings_eq(substr, pattern_slice);
+            let substr = FheString {
+                bytes: str.bytes[start..].to_vec(),
+                padded: str.padded,
+            };
+            let is_matched = self.fhestrings_eq(&substr, pattern);
 
             let mut mask = is_matched.clone().into_radix(NUM_BLOCKS, &self.key);
             // If mask == 0u8, it will become 255u8. If it was 1u8, it will become 0u8.
@@ -40,7 +42,7 @@ impl ServerKey {
         res
     }
 
-    fn compare_shifted_strip_plaintext(
+    fn compare_range_strip_plaintext(
         &self,
         str: &mut FheString,
         pattern: &PlaintextString,
@@ -48,7 +50,10 @@ impl ServerKey {
     ) -> BooleanBlock {
         let mut res = self.key.create_trivial_boolean_block(false);
         for start in range {
-            let substr = &str.clone().bytes[start..];
+            let substr = FheString {
+                bytes: str.bytes[start..].to_vec(),
+                padded: str.padded,
+            };
             let is_matched = self.fhestring_eq_string(&substr, pattern.data.as_str());
 
             let mut mask = is_matched.clone().into_radix(NUM_BLOCKS, &self.key);
@@ -89,10 +94,10 @@ impl ServerKey {
         let mut resulted_str = str.clone();
         let is_striped = match pattern {
             GenericPattern::Clear(pattern) => {
-                self.compare_shifted_strip_plaintext(&mut resulted_str, pattern, 0..=0)
+                self.compare_range_strip_plaintext(&mut resulted_str, pattern, 0..=0)
             }
             GenericPattern::Enc(pattern) => {
-                self.compare_shifted_strip(&mut resulted_str, pattern, 0..=0)
+                self.compare_range_strip(&mut resulted_str, pattern, 0..=0)
             }
         };
         (resulted_str, is_striped)
@@ -119,14 +124,14 @@ impl ServerKey {
                     return (resulted_str, self.key.create_trivial_boolean_block(false));
                 }
                 let diff = str.bytes.len() - pattern.data.len();
-                self.compare_shifted_strip_plaintext(&mut resulted_str, pattern, diff..=diff)
+                self.compare_range_strip_plaintext(&mut resulted_str, pattern, diff..=diff)
             }
             GenericPattern::Enc(pattern) => {
                 if str.bytes.len() < pattern.bytes.len() {
                     return (resulted_str, self.key.create_trivial_boolean_block(false));
                 }
                 let diff = str.bytes.len() - pattern.bytes.len();
-                self.compare_shifted_strip(&mut resulted_str, pattern, diff..=diff)
+                self.compare_range_strip(&mut resulted_str, pattern, diff..=diff)
             }
         };
         (resulted_str, is_striped)
@@ -137,27 +142,21 @@ impl ServerKey {
 mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
-    use crate::{
-        fhe_string::{FheString, GenericPattern, PlaintextString},
-        generate_keys,
-    };
+    use crate::{fhe_string::GenericPattern, generate_keys};
 
     #[test]
     fn test_strip_prefix() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let (haystack, needle) = ("hello", "he");
 
-        let enc_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);
-        let enc_needle = GenericPattern::Enc(FheString::encrypt(
-            PlaintextString::new(needle.to_string()),
-            &ck,
-        ));
+        let enc_haystack = ck.enc_str(haystack, 0);
+        let enc_needle = GenericPattern::Enc(ck.enc_str(needle, 1));
 
         let (enc_res, enc_is_striped) = sk.strip_prefix(&enc_haystack, &enc_needle);
         let is_striped = ck.key.decrypt_bool(&enc_is_striped);
 
         assert!(is_striped);
-        assert_eq!(enc_res.decrypt(&ck), "llo".to_string());
+        assert_eq!(ck.dec_str(&enc_res), "llo".to_string());
     }
 
     #[test]
@@ -165,16 +164,12 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let (haystack, needle) = ("h", "he");
 
-        let enc_haystack = FheString::encrypt(PlaintextString::new(haystack.to_string()), &ck);
-        let enc_needle = GenericPattern::Enc(FheString::encrypt(
-            PlaintextString::new(needle.to_string()),
-            &ck,
-        ));
-
+        let enc_haystack = ck.enc_str(haystack, 0);
+        let enc_needle = GenericPattern::Enc(ck.enc_str(needle, 1));
         let (enc_res, enc_is_striped) = sk.strip_suffix(&enc_haystack, &enc_needle);
         let is_striped = ck.key.decrypt_bool(&enc_is_striped);
 
         assert!(!is_striped);
-        assert_eq!(enc_res.decrypt(&ck), "llo".to_string());
+        assert_eq!(ck.dec_str(&enc_res), "llo".to_string());
     }
 }

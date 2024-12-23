@@ -48,7 +48,7 @@ impl ServerKey {
             return str.clone();
         }
 
-        // We need to split the string into `n + 1` parts, hence we have to call splitn with n + 1. 
+        // We need to split the string into `n + 1` parts, hence we have to call splitn with n + 1.
         let n = match n {
             U16Arg::Clear(n) => U16Arg::Clear(*n + 1),
             U16Arg::Enc(n) => U16Arg::Enc(FheU16 {
@@ -76,7 +76,7 @@ impl ServerKey {
                     GenericPattern::Enc(pat) => pat.clone(),
                 };
                 let max_matches = self.max_matches(str, &pattern);
-                
+
                 for _ in 0..max_matches - 1 {
                     let (item, is_some) = iter.next(self);
                     self.key.boolean_bitand_assign(&mut concated, &is_some);
@@ -108,25 +108,28 @@ impl ServerKey {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
-    use crate::{client_key::U16Arg, fhe_string::{FheString, GenericPattern, PlaintextString}, generate_keys};
+    use crate::{
+        client_key::U16Arg,
+        fhe_string::{GenericPattern, PlaintextString},
+        generate_keys,
+    };
 
     #[test]
     fn test_replacen() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, from, to) = ("hello", "l", "r");
-        let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
+        let fhe_s = ck.enc_str(s, 0);
         let fhe_from = GenericPattern::Clear(PlaintextString::new(from.to_string()));
-        let fhe_to = FheString::encrypt(PlaintextString::new(to.to_string()), &ck);
+        let fhe_to = ck.enc_str(to, 0);
         let n = U16Arg::Clear(1);
 
         let enc_res = sk.replacen(&fhe_s, &fhe_from, &fhe_to, &n);
-        let res = enc_res.decrypt(&ck);
+        let res = ck.dec_str(&enc_res);
         assert_eq!(res, "herlo");
     }
 
@@ -135,12 +138,12 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, from, to) = ("hello", "l", "r");
-        let fhe_s = FheString::encrypt(PlaintextString::new(s.to_string()), &ck);
-        let fhe_from = GenericPattern::Enc(FheString::encrypt(PlaintextString::new(from.to_string()), &ck));
-        let fhe_to = FheString::encrypt(PlaintextString::new(to.to_string()), &ck);
+        let fhe_s = ck.enc_str(s, 0);
+        let fhe_from = GenericPattern::Enc(ck.enc_str(from, 0));
+        let fhe_to = ck.enc_str(to, 0);
 
         let enc_res = sk.replace(&fhe_s, &fhe_from, &fhe_to);
-        let res = enc_res.decrypt(&ck);
+        let res = ck.dec_str(&enc_res);
         assert_eq!(res, "herro");
     }
 }

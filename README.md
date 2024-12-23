@@ -47,3 +47,22 @@ Wrapper the methods in FheString with thread_local.
 
 [1]: https://github.com/JoseSK999/fhe_strings
 [2]: ZAMA tfhe.rs doc
+
+
+```
+    keys.assert_split_once(str, str_pad, pat, pat_pad);
+    keys.assert_rsplit_once(str, str_pad, pat, pat_pad);
+
+    keys.assert_split(str, str_pad, pat, pat_pad);
+    keys.assert_rsplit(str, str_pad, pat, pat_pad);
+
+    keys.assert_split_terminator(str, str_pad, pat, pat_pad);
+    keys.assert_rsplit_terminator(str, str_pad, pat, pat_pad);
+    keys.assert_split_inclusive(str, str_pad, pat, pat_pad);
+
+    keys.assert_splitn(str, str_pad, pat, pat_pad, n, max);
+    keys.assert_rsplitn(str, str_pad, pat, pat_pad, n, max);
+
+    keys.assert_replace(str, str_pad, pat, pat_pad, to, to_pad);
+    keys.assert_replacen((str, str_pad), (pat, pat_pad), (to, to_pad), n, max);
+```

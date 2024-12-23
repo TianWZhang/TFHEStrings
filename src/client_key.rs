@@ -4,6 +4,8 @@ use tfhe::{
     shortint::ShortintParameterSet,
 };
 
+use crate::fhe_string::{FheString, NUM_BLOCKS};
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ClientKey {
     pub key: TfheClientKey,
@@ -31,6 +33,50 @@ impl ClientKey {
         Self {
             key: TfheClientKey::new(parameters),
         }
+    }
+
+    pub fn enc_str(&self, data: &str, padding: u32) -> FheString {
+        assert!(data.is_ascii() && !data.contains('\0'));
+        let mut bytes: Vec<_> = data
+            .bytes()
+            .map(|b| self.key.encrypt_radix(b, NUM_BLOCKS))
+            .collect();
+        let nulls = (0..padding).map(|_| self.key.encrypt_radix(0u8, NUM_BLOCKS));
+        bytes.extend(nulls);
+        FheString {
+            bytes,
+            padded: padding > 0,
+        }
+    }
+
+    /// Decrypts a `FheString`, removes any padding and returns the ASCII string.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the decrypted string is not ASCII or the `FheString` padding
+    /// flag doesn't match the actual string.
+    pub fn dec_str(&self, ct: &FheString) -> String {
+        let padded = ct.padded;
+        let mut notnull = true;
+        let bytes = ct
+            .bytes
+            .iter()
+            .filter_map(|enc_char| {
+                let b = self.key.decrypt_radix(enc_char);
+                if b == 0 {
+                    notnull = false;
+                    assert!(padded, "Unexpected null byte in non-padded string");
+                    None
+                } else {
+                    assert!(notnull, "Unexpected non-null byte after null byte");
+                    Some(b)
+                }
+            })
+            .collect();
+        if padded {
+            assert!(!notnull, "Padded string must end with null byte");
+        }
+        String::from_utf8(bytes).unwrap()
     }
 
     /// Encrypts a u16 value. It also takes an optional `max` value to restrict the range
