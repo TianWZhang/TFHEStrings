@@ -152,7 +152,7 @@ mod tests {
     fn test_lt() {
         let (s1, s2) = ("apple", "banana");
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
-        let fhe_s1 = ck.enc_str(s1, 0);
+        let fhe_s1 = ck.enc_str(s1, 1);
         let fhe_s2 = ck.enc_str(s2, 0);
         let fhe_res = sk.lt(&fhe_s1, &fhe_s2);
         let res = ck.key.decrypt_bool(&fhe_res);

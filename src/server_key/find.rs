@@ -1,21 +1,20 @@
-use std::ops::Range;
-
 use super::{FheStringIsEmpty, FheStringLen, IsMatch, ServerKey};
 use crate::fhe_string::{FheString, GenericPattern, PlaintextString};
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use tfhe::integer::{prelude::ServerKeyDefaultCMux, BooleanBlock, RadixCiphertext};
 
 impl ServerKey {
-    // Compare `pattern` with `str`, with `pattern` shifted in range [l..=r].
+    // Compare the substring `pattern[range]` with `str`.
     // Returns the first character index of the last match, or the first character index
-    // of the first match if the range is reversed. If there's no match defaults to 0
+    // of the first match if the range is reversed. If there's no match, the last match index 
+    // defaults to 0.
     fn compare_range_index(
         &self,
         str: &FheString,
         pattern: &FheString,
-        range: Range<usize>,
+        range: impl IntoParallelIterator<Item = usize>,
         ignore_pattern_pad: bool
-    ) -> (RadixCiphertext, BooleanBlock) {
+    ) -> (RadixCiphertext, BooleanBlock) { // str = 'elle\0\0', pattern = 'e', range = 0..5, ignore_pattern_pad = false
         let mut is_found = self.key.create_trivial_boolean_block(false);
         // We consider the index as u32.
         let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
@@ -25,11 +24,11 @@ impl ServerKey {
             .into_par_iter()
             .map(|start| {
                 let is_matched = if ignore_pattern_pad {
-                    let str_pat = str.bytes.iter().skip(start).zip(pattern.bytes.iter()).par_bridge();
-                    self.starts_with_ignore_pattern_padding(str_pat)
+                    let str_pattern = str.bytes.iter().skip(start).zip(pattern.bytes.iter()).par_bridge();
+                    self.starts_with_ignore_pattern_padding(str_pattern)
                 } else {
                     let substr = FheString {
-                        bytes: str.bytes[start..].to_vec(),
+                        bytes: str.bytes[start..start + pattern.bytes.len()].to_vec(),
                         padded: str.padded,
                     };
                     self.fhestrings_eq(&substr, pattern)
@@ -49,13 +48,6 @@ impl ServerKey {
                 || self.key.boolean_bitor_assign(&mut is_found, &is_matched),
             );
         }
-        last_match_index = self.key.if_then_else_parallelized(
-            &is_found,
-            &last_match_index,
-            &self
-                .key
-                .create_trivial_radix(str.bytes.len() as u32, num_blocks),
-        );
         (last_match_index, is_found)
     }
 
@@ -63,7 +55,7 @@ impl ServerKey {
         &self,
         str: &FheString,
         pattern: &PlaintextString,
-        range: Range<usize>,
+        range: impl IntoParallelIterator<Item = usize>,
     ) -> (RadixCiphertext, BooleanBlock) {
         let mut res = self.key.create_trivial_boolean_block(false);
         let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
@@ -72,7 +64,7 @@ impl ServerKey {
             .into_par_iter()
             .map(|start| {
                 let substr = FheString {
-                    bytes: str.bytes[start..].to_vec(),
+                    bytes: str.bytes[start..start + pattern.data.len()].to_vec(),
                     padded: str.padded,
                 };
                 let is_matched = self.fhestring_eq_string(&substr, pattern.data.as_str());
@@ -122,6 +114,7 @@ impl ServerKey {
         };
         match self.is_matched_early_checks(str, &trivial_or_enc_pat) {
             IsMatch::Clear(val) => {
+                // val = true only if pattern is empty, in which case the last match index is str.len()
                 let index = if val {
                     match self.len(str) {
                         FheStringLen::Padding(cipher_len) => cipher_len,
@@ -132,13 +125,13 @@ impl ServerKey {
                 };
                 return (index, self.key.create_trivial_boolean_block(val));
             }
+            // This variant is only returned if `str` is empty, hence the last match index is always 0.
             IsMatch::Cipher(val) => return (self.key.create_trivial_zero_radix(num_blocks), val),
             _ => (),
         }
         
         let ignore_pattern_padding = trivial_or_enc_pat.padded;
         let (str_rfind, pat_rfind, range) = self.contains_cases(str, &trivial_or_enc_pat);
-        
 
         let ((mut last_match_index, res), option) = rayon::join(
             || match pattern {
@@ -205,22 +198,16 @@ impl ServerKey {
         
         let ignore_pattern_padding = trivial_or_enc_pat.padded;
         let (str_find, pat_find, range) = self.contains_cases(str, &trivial_or_enc_pat);
+        let range_rev: Vec<_> = range.rev().collect();
         match pattern {
-            GenericPattern::Enc(pat) => {
-                if str.bytes.len() < pat.bytes.len() {
-                    return (
-                        self.key
-                            .create_trivial_radix(str.bytes.len() as u32, num_blocks),
-                        self.key.create_trivial_boolean_block(false),
-                    );
-                }
-                self.compare_range_index(&str_find, &pat_find, range, ignore_pattern_padding)
+            GenericPattern::Enc(_) => {
+                self.compare_range_index(&str_find, &pat_find, range_rev, ignore_pattern_padding)
             }
             GenericPattern::Clear(pat) => {
                 self.compare_range_index_plaintext(
                     &str_find,
                     pat,
-                    range,
+                    range_rev,
                 )
             }
         }
@@ -231,13 +218,13 @@ impl ServerKey {
 mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
-    use crate::{fhe_string::GenericPattern, generate_keys};
+    use crate::{fhe_string::{GenericPattern, PlaintextString}, generate_keys};
 
     #[test]
     fn test_find() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
-        let (haystack, needle) = ("ell", "e");
+        let (haystack, needle) = ("elle", "e");
         let enc_haystack = ck.enc_str(&haystack, 0);
         let enc_needle = GenericPattern::Enc(ck.enc_str(&needle, 3));
         let (index, found) = sk.find(&enc_haystack, &enc_needle);
@@ -253,23 +240,60 @@ mod tests {
         let index = ck.key.decrypt_radix::<u32>(&index);
         let found = ck.key.decrypt_bool(&found);
         assert!(!found);
-        assert_eq!(index, 3);
+        assert_eq!(index, 0);
+    }
+
+    #[test]
+    fn test_find_with_padded_str() {
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
+
+        let (haystack, needle) = ("elle", "e");
+        let enc_haystack = ck.enc_str(&haystack, 2);
+        let plaintext_needle = GenericPattern::Clear(PlaintextString::new(needle.to_string()));
+        let (index, found) = sk.find(&enc_haystack, &plaintext_needle);
+        let index = ck.key.decrypt_radix::<u32>(&index);
+        let found = ck.key.decrypt_bool(&found);
+        assert!(found);
+        assert_eq!(index, 0);
+
+        let (haystack, needle) = ("ell", "le");
+        let enc_haystack = ck.enc_str(&haystack, 3);
+        let enc_needle = GenericPattern::Enc(ck.enc_str(&needle, 1));
+        let (_, found) = sk.find(&enc_haystack, &enc_needle);
+        let found = ck.key.decrypt_bool(&found);
+        assert!(!found);
+
+        let (haystack, needle) = ("elle", "e");
+        let enc_haystack = ck.enc_str(&haystack, 3);
+        let enc_needle = GenericPattern::Enc(ck.enc_str(&needle, 0));
+        let (index, found) = sk.find(&enc_haystack, &enc_needle);
+        let index = ck.key.decrypt_radix::<u32>(&index);
+        let found = ck.key.decrypt_bool(&found);
+        assert!(found);
+        assert_eq!(index, 0);
     }
 
     #[test]
     fn test_rfind() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
-        let (haystack, needle) = ("ell", "l");
 
+        let (haystack, needle) = ("ell", "l");
         let enc_haystack = ck.enc_str(&haystack, 0);
         let enc_needle = GenericPattern::Enc(ck.enc_str(&needle, 1));
-
         let (index, found) = sk.rfind(&enc_haystack, &enc_needle);
         let index = ck.key.decrypt_radix::<u32>(&index);
         let found = ck.key.decrypt_bool(&found);
-
         assert!(found);
         assert_eq!(index, 2);
+
+        let (haystack, needle) = ("elle", "e");
+        let enc_haystack = ck.enc_str(&haystack, 2);
+        let enc_needle = GenericPattern::Enc(ck.enc_str(&needle, 1));
+        let (index, found) = sk.rfind(&enc_haystack, &enc_needle);
+        let index = ck.key.decrypt_radix::<u32>(&index);
+        let found = ck.key.decrypt_bool(&found);
+        assert!(found);
+        assert_eq!(index, 3);
     }
 
     #[test]
@@ -280,6 +304,9 @@ mod tests {
         let fhe_haystack = ck.enc_str(&haystack, 0);
         let fhe_needle = GenericPattern::Enc(ck.enc_str(&needle, 1));
         let fhe_s = sk.trim_start(&fhe_haystack);
+        println!("fhe_s.bytes.len(): {}", fhe_s.bytes.len());
+        let s = ck.dec_str(&fhe_s);
+        println!("s: {}", s);
 
         let (index, found) = sk.find(&fhe_s, &fhe_needle);
         let index = ck.key.decrypt_radix::<u32>(&index);

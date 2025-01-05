@@ -49,23 +49,6 @@ impl ServerKey {
         }
     }
 
-    // fn trim_ciphertexts_lsb(&self, lhs: &mut RadixCiphertext, rhs: &mut RadixCiphertext) {
-    //     let lhs_blocks = lhs.blocks_mut().len();
-    //     let rhs_blocks = rhs.blocks_mut().len();
-
-    //     match lhs_blocks.cmp(&rhs_blocks) {
-    //         Ordering::Less => {
-    //             let diff = rhs_blocks - lhs_blocks;
-    //             self.key.trim_radix_blocks_lsb_assign(rhs, diff);
-    //         }
-    //         Ordering::Greater => {
-    //             let diff = lhs_blocks - rhs_blocks;
-    //             self.key.trim_radix_blocks_lsb_assign(lhs, diff);
-    //         }
-    //         _ => (),
-    //     }
-    // }
-
     fn pad_ciphertexts_lsb(&self, lhs: &mut RadixCiphertext, rhs: &mut RadixCiphertext) {
         let lhs_blocks = lhs.blocks().len();
         let rhs_blocks = rhs.blocks().len();
@@ -447,8 +430,8 @@ impl ServerKey {
                 res.bytes.extend_from_slice(&rhs.bytes);
                 res.padded = rhs.padded;
             }
-            // If lhs is padded we can shift it right such that all nulls move to the start, then
-            // we append the rhs and shift it left again to move the nulls to the new end
+            // If lhs is padded we can right shift it such that all nulls move to the start, then
+            // we append the rhs and left shift it again to move the nulls to the new end.
             FheStringLen::Padding(len) => {
                 let padded_len = self
                     .key
@@ -495,7 +478,7 @@ impl ServerKey {
                 }
                 // If str was not padded and n == max we don't get nulls at the end. However if
                 // n < max we do, and as these conditions are unknown we have to ensure result is
-                // actually padded
+                // actually padded.
                 if !str.padded {
                     res.append_null(self);
                 }
@@ -540,7 +523,7 @@ mod tests {
     fn test_to_lowercase() {
         let s = "AF";
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
-        let fhe_s = ck.enc_str(s, 0);
+        let fhe_s = ck.enc_str(s, 1);
         let fhe_s_tolowercase = sk.to_lowercase(&fhe_s);
         let s_tolowercase = ck.dec_str(&fhe_s_tolowercase);
         assert_eq!(s_tolowercase, s.to_lowercase());
@@ -562,7 +545,7 @@ mod tests {
         let s2 = "hello";
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let fhe_s1 = ck.enc_str(s1, 0);
-        let fhe_s2 = GenericPattern::Enc(ck.enc_str(s2, 0));
+        let fhe_s2 = GenericPattern::Enc(ck.enc_str(s2, 2));
         let fhe_res = sk.eq_ignore_case(&fhe_s1, &fhe_s2);
         let res = ck.key.decrypt_bool(&fhe_res);
         assert_eq!(res, s1.eq_ignore_ascii_case(s2));
@@ -572,7 +555,7 @@ mod tests {
     fn test_concat() {
         let (s1, s2) = ("Hello, ", "world!");
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
-        let fhe_s1 = ck.enc_str(s1, 0);
+        let fhe_s1 = ck.enc_str(s1, 1);
         let fhe_s2 = ck.enc_str(s2, 0);
         let fhe_res = sk.concat(&fhe_s1, &fhe_s2);
         let res = ck.dec_str(&fhe_res);

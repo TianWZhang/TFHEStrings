@@ -31,7 +31,31 @@ Inspired by [1], we take a similar approach to implement conversions between enc
 - Speeding up comparisons and pattern matching: We perform a _single comparison_ between two numbers. This is more efficient than many u8 comparisons.
 - Shifting by an encrypted number of characters: By treating the string as a `RadixCiphertext` we can use the tfhe-rs shifting operations, and then convert back to `FheString`.
 
-TODO: pesudo code of split, find, trim_start, replace
+The encrypted strings (`FheString`) support the encryption of `\0`-padded plaintext strings. Padding allows us to hide the length of the plaintext string. Furthermore, padding is necessary in some cases such as strip, split and trim. For example, `trim()` returns a new encrypted string with whitespace removed from both the start and end. Instead of actually removing whitespace, we replace them with `\0` to remove them logically. Even if the original `FheString` is not padded, after some homomorphic string operations, it will inevitably become padded.
+
+TODO: pesudo code of split, trim_start, replace
+
+```rust
+    /// Returns a tuple containing the byte index of the first character from the end of this
+    /// encrypted string that matches the given pattern (either encrypted or clear), and a
+    /// boolean indicating if a match was found.
+    ///
+    /// If the pattern doesn’t match, the function returns a tuple where the boolean part is
+    /// `false`, indicating the equivalent of `None`.
+    pub fn find(
+        &self,
+        str: &FheString,
+        pattern: &GenericPattern,
+    ) -> (RadixCiphertext, BooleanBlock) {
+        // check special cases and early return, e.g. if `pattern` is not padded and the length of `str` is less than that of `pattern`, then `pattern` cannot be found in `str`.
+        // If `pattern` is padded, we should compare `pattern` with all the suffixs of `str` instead of `str[i..i+pattern.len()]` because we are not sure 
+        // what is the true length of `pattern`.
+        // We need to compare `pattern` with a substring of `str` `str[i..]`. In the comparision, the padding of `pattern` should be ignored. In other words, if a character of `pattern` is `\0`, no matter what the corresponding character of the substring is, we think these two characters are equal. However, we have to take care of a specical case where `pattern` is padded and `str` is not padded, we will pad a null at the end of `str`.
+        // We use zip in the comparision and in rust, zip will stop as soon as one of iterators stops producing values. 
+        // For example, str = abc, pattern = abcd00, without padding, str.zip(pattern) becomes [('a', 'a'), ('b', 'b'), ('c', 'c')], hence we will think `str` matches `pattern` at the start, which is wrong. With padding, str = "abc\0", str.zip(pattern) becomes [('a', 'a'), ('b', 'b'), ('c', 'c'), ('\0', 'd')], hence these two are not equal.
+        // If `pattern` is not padded, we should compare `pattern` with all the substrings of `str` of length `pattern.len()`.
+    }
+```
 
 ## Test Cases
 

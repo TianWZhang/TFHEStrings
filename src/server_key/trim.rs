@@ -235,7 +235,7 @@ mod tests {
     fn test_trim_start() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let s = "  hello world  ";
-        let enc_s = ck.enc_str(s, 0);
+        let enc_s = ck.enc_str(s, 2);
         let enc_res = sk.trim_start(&enc_s);
         assert_eq!(ck.dec_str(&enc_res), "hello world  ");
     }
@@ -253,7 +253,7 @@ mod tests {
     fn test_trim() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let s = "  hello world  ";
-        let enc_s = ck.enc_str(s, 0);
+        let enc_s = ck.enc_str(s, 3);
         let enc_res = sk.trim(&enc_s);
         assert_eq!(ck.dec_str(&enc_res), "hello world");
     }
