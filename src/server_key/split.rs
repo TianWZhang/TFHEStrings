@@ -56,7 +56,9 @@ impl FheStringIterator for Split {
             },
             || match sk.is_empty(&trivial_or_enc_pat) {
                 FheStringIsEmpty::Padding(enc) => enc.into_radix(num_blocks, &sk.key),
-                FheStringIsEmpty::NoPadding(clear) => sk.key.create_trivial_radix(clear as u32, num_blocks),
+                FheStringIsEmpty::NoPadding(clear) => {
+                    sk.key.create_trivial_radix(clear as u32, num_blocks)
+                }
             },
         );
 

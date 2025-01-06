@@ -23,7 +23,12 @@ impl ServerKey {
             .map(|start| {
                 if ignore_pattern_padding {
                     // We can guarantee that `str` always ends with at least one padding zero.
-                    let str_pat = str.bytes.iter().skip(start).zip(pattern.bytes.iter()).par_bridge();
+                    let str_pat = str
+                        .bytes
+                        .iter()
+                        .skip(start)
+                        .zip(pattern.bytes.iter())
+                        .par_bridge();
                     self.starts_with_ignore_pattern_padding(str_pat)
                 } else {
                     let substr = FheString {
@@ -164,7 +169,7 @@ impl ServerKey {
             IsMatch::Cipher(val) => return val,
             _ => (),
         }
-        
+
         match pattern {
             GenericPattern::Clear(pattern) => {
                 let (str, pattern, range) = self.clear_ends_with_cases(str, &pattern.data);

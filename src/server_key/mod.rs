@@ -201,7 +201,11 @@ impl ServerKey {
         res
     }
 
-    fn clear_ends_with_cases(&self, str: &FheString, pattern: &str) -> (FheString, PlaintextString, Range<usize>) {
+    fn clear_ends_with_cases(
+        &self,
+        str: &FheString,
+        pattern: &str,
+    ) -> (FheString, PlaintextString, Range<usize>) {
         let str_len = str.bytes.len();
         let pat_len = pattern.len();
 
@@ -211,23 +215,31 @@ impl ServerKey {
                 bytes: str.bytes[0..str_len - 1].to_vec(),
                 padded: true,
             };
-            let mut pattern  = pattern.to_owned();
+            let mut pattern = pattern.to_owned();
             pattern.push('\0');
-            (str, PlaintextString {data: pattern}, 0..diff + 1)
+            (str, PlaintextString { data: pattern }, 0..diff + 1)
         } else {
             let diff = str_len - pat_len;
-            (str.clone(), PlaintextString {data: pattern.to_owned()}, diff..diff + 1)
+            (
+                str.clone(),
+                PlaintextString {
+                    data: pattern.to_owned(),
+                },
+                diff..diff + 1,
+            )
         }
     }
 
-    fn ends_with_cases(&self, str: &FheString, pattern: &FheString) -> (FheString, FheString, Range<usize>) {
+    fn ends_with_cases(
+        &self,
+        str: &FheString,
+        pattern: &FheString,
+    ) -> (FheString, FheString, Range<usize>) {
         let str_len = str.bytes.len();
         let pat_len = pattern.bytes.len();
 
         match (str.padded, pattern.padded) {
-            (true, true) => {
-                (str.clone(), pattern.clone(), 0..str_len)
-            }
+            (true, true) => (str.clone(), pattern.clone(), 0..str_len),
 
             (true, false) => {
                 let diff = str_len - pat_len - 1;
@@ -236,7 +248,9 @@ impl ServerKey {
                     padded: true,
                 };
                 let mut pattern = pattern.clone();
-                pattern.bytes.push(self.key.create_trivial_zero_radix(NUM_BLOCKS));
+                pattern
+                    .bytes
+                    .push(self.key.create_trivial_zero_radix(NUM_BLOCKS));
                 pattern.padded = true;
                 (str, pattern, 0..diff + 1)
             }
@@ -245,8 +259,9 @@ impl ServerKey {
             // to check if "abc\0" == pattern[..4]
             (false, true) => {
                 let mut str = str.clone();
-                    str.bytes.push(self.key.create_trivial_zero_radix(NUM_BLOCKS));
-                    str.padded = true;
+                str.bytes
+                    .push(self.key.create_trivial_zero_radix(NUM_BLOCKS));
+                str.padded = true;
                 if pat_len - 1 > str_len {
                     (str, pattern.clone(), 0..str_len + 1)
                 } else {
@@ -254,12 +269,12 @@ impl ServerKey {
                         bytes: pattern.bytes[0..pat_len - 1].to_vec(),
                         padded: true,
                     };
-                    let diff = str_len - 1 - pat_len;
+                    let diff = str_len - pat_len + 1;
                     (str, pattern, diff..diff + pat_len)
                 }
             }
 
-            // If neither str nor pattern are padded, we can directly compare 
+            // If neither str nor pattern are padded, we can directly compare
             // the last `pat_len` characters of `str` with `pattern`.
             (false, false) => {
                 let diff = str_len - pat_len;

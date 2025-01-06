@@ -6,15 +6,16 @@ use tfhe::integer::{prelude::ServerKeyDefaultCMux, BooleanBlock, RadixCiphertext
 impl ServerKey {
     // Compare the substring `pattern[range]` with `str`.
     // Returns the first character index of the last match, or the first character index
-    // of the first match if the range is reversed. If there's no match, the last match index 
+    // of the first match if the range is reversed. If there's no match, the last match index
     // defaults to 0.
     fn compare_range_index(
         &self,
         str: &FheString,
         pattern: &FheString,
         range: impl IntoParallelIterator<Item = usize>,
-        ignore_pattern_pad: bool
-    ) -> (RadixCiphertext, BooleanBlock) { // str = 'elle\0\0', pattern = 'e', range = 0..5, ignore_pattern_pad = false
+        ignore_pattern_pad: bool,
+    ) -> (RadixCiphertext, BooleanBlock) {
+        // str = 'elle\0\0', pattern = 'e', range = 0..5, ignore_pattern_pad = false
         let mut is_found = self.key.create_trivial_boolean_block(false);
         // We consider the index as u32.
         let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
@@ -24,7 +25,12 @@ impl ServerKey {
             .into_par_iter()
             .map(|start| {
                 let is_matched = if ignore_pattern_pad {
-                    let str_pattern = str.bytes.iter().skip(start).zip(pattern.bytes.iter()).par_bridge();
+                    let str_pattern = str
+                        .bytes
+                        .iter()
+                        .skip(start)
+                        .zip(pattern.bytes.iter())
+                        .par_bridge();
                     self.starts_with_ignore_pattern_padding(str_pattern)
                 } else {
                     let substr = FheString {
@@ -118,7 +124,9 @@ impl ServerKey {
                 let index = if val {
                     match self.len(str) {
                         FheStringLen::Padding(cipher_len) => cipher_len,
-                        FheStringLen::NoPadding(len) => self.key.create_trivial_radix(len as u32, num_blocks)
+                        FheStringLen::NoPadding(len) => {
+                            self.key.create_trivial_radix(len as u32, num_blocks)
+                        }
                     }
                 } else {
                     self.key.create_trivial_zero_radix(num_blocks)
@@ -129,7 +137,7 @@ impl ServerKey {
             IsMatch::Cipher(val) => return (self.key.create_trivial_zero_radix(num_blocks), val),
             _ => (),
         }
-        
+
         let ignore_pattern_padding = trivial_or_enc_pat.padded;
         let (str_rfind, pat_rfind, range) = self.contains_cases(str, &trivial_or_enc_pat);
 
@@ -191,11 +199,16 @@ impl ServerKey {
             GenericPattern::Enc(pattern) => pattern.clone(),
         };
         match self.is_matched_early_checks(str, &trivial_or_enc_pat) {
-            IsMatch::Clear(val) => return (self.key.create_trivial_zero_radix(num_blocks), self.key.create_trivial_boolean_block(val)),
+            IsMatch::Clear(val) => {
+                return (
+                    self.key.create_trivial_zero_radix(num_blocks),
+                    self.key.create_trivial_boolean_block(val),
+                )
+            }
             IsMatch::Cipher(val) => return (self.key.create_trivial_zero_radix(num_blocks), val),
             _ => (),
         }
-        
+
         let ignore_pattern_padding = trivial_or_enc_pat.padded;
         let (str_find, pat_find, range) = self.contains_cases(str, &trivial_or_enc_pat);
         let range_rev: Vec<_> = range.rev().collect();
@@ -204,11 +217,7 @@ impl ServerKey {
                 self.compare_range_index(&str_find, &pat_find, range_rev, ignore_pattern_padding)
             }
             GenericPattern::Clear(pat) => {
-                self.compare_range_index_plaintext(
-                    &str_find,
-                    pat,
-                    range_rev,
-                )
+                self.compare_range_index_plaintext(&str_find, pat, range_rev)
             }
         }
     }
@@ -218,7 +227,10 @@ impl ServerKey {
 mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
-    use crate::{fhe_string::{GenericPattern, PlaintextString}, generate_keys};
+    use crate::{
+        fhe_string::{GenericPattern, PlaintextString},
+        generate_keys,
+    };
 
     #[test]
     fn test_find() {
@@ -304,9 +316,9 @@ mod tests {
         let fhe_haystack = ck.enc_str(&haystack, 0);
         let fhe_needle = GenericPattern::Enc(ck.enc_str(&needle, 1));
         let fhe_s = sk.trim_start(&fhe_haystack);
-        println!("fhe_s.bytes.len(): {}", fhe_s.bytes.len());
-        let s = ck.dec_str(&fhe_s);
-        println!("s: {}", s);
+        println!("fhe_s.bytes.len(): {}", fhe_s.bytes.len()); // 4
+        let s = ck.dec_str(&fhe_s); // ""
+        assert_eq!(s, "h");
 
         let (index, found) = sk.find(&fhe_s, &fhe_needle);
         let index = ck.key.decrypt_radix::<u32>(&index);

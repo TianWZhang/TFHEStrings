@@ -144,7 +144,7 @@ impl ServerKey {
 
     /// Returns a new encrypted string with whitespace removed from the start.
     pub fn trim_start(&self, str: &FheString) -> FheString {
-        if str.bytes.is_empty() {
+        if str.bytes.is_empty() || (str.padded && str.bytes.len() == 1) {
             return str.clone();
         }
         let mut res = self.compare_trim(&str, false);
