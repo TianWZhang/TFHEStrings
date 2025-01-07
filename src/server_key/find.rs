@@ -1,4 +1,4 @@
-use super::{FheStringIsEmpty, FheStringLen, IsMatch, ServerKey};
+use super::{FheStringIsEmpty, IsMatch, ServerKey};
 use crate::fhe_string::{FheString, GenericPattern, PlaintextString};
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use tfhe::integer::{prelude::ServerKeyDefaultCMux, BooleanBlock, RadixCiphertext};
@@ -122,12 +122,7 @@ impl ServerKey {
             IsMatch::Clear(val) => {
                 // val = true only if pattern is empty, in which case the last match index is str.len()
                 let index = if val {
-                    match self.len(str) {
-                        FheStringLen::Padding(cipher_len) => cipher_len,
-                        FheStringLen::NoPadding(len) => {
-                            self.key.create_trivial_radix(len as u32, num_blocks)
-                        }
-                    }
+                    self.len_enc(str)
                 } else {
                     self.key.create_trivial_zero_radix(num_blocks)
                 };
@@ -155,12 +150,7 @@ impl ServerKey {
                 // (the actual length) which doesn't correspond to our `last_match_index`
                 if let FheStringIsEmpty::Padding(is_empty) = self.is_empty(&trivial_or_enc_pat) {
                     if str.padded {
-                        let str_true_len = match self.len(str) {
-                            FheStringLen::Padding(cipher_len) => cipher_len,
-                            FheStringLen::NoPadding(len) => {
-                                self.key.create_trivial_radix(len as u32, 16)
-                            }
-                        };
+                        let str_true_len = self.len_enc(str);
                         Some((is_empty, str_true_len))
                     } else {
                         None
@@ -316,9 +306,6 @@ mod tests {
         let fhe_haystack = ck.enc_str(&haystack, 0);
         let fhe_needle = GenericPattern::Enc(ck.enc_str(&needle, 1));
         let fhe_s = sk.trim_start(&fhe_haystack);
-        println!("fhe_s.bytes.len(): {}", fhe_s.bytes.len()); // 4
-        let s = ck.dec_str(&fhe_s); // ""
-        assert_eq!(s, "h");
 
         let (index, found) = sk.find(&fhe_s, &fhe_needle);
         let index = ck.key.decrypt_radix::<u32>(&index);

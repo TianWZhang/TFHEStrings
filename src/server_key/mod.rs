@@ -302,7 +302,6 @@ impl ServerKey {
         let uint = str.to_uint(self);
         let mut shift_bits = self.key.scalar_left_shift_parallelized(shift, 3);
         // `shift_bits` needs to have the same number of blocks as `uint` for tfhe.rs shift operations
-        // necessary?
         self.pad_or_trim_ciphertext(&mut shift_bits, uint.blocks().len());
 
         let shifted_uint = self.key.left_shift_parallelized(&uint, &shift_bits);
@@ -408,15 +407,26 @@ impl ServerKey {
     pub fn len(&self, str: &FheString) -> FheStringLen {
         let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
         if str.padded {
-            let mut res = self.key.create_trivial_zero_radix(NUM_BLOCKS);
-            for c in &str.bytes {
-                let non_zero = self.key.scalar_ne_parallelized(c, 0u8);
-                self.key
-                    .add_assign_parallelized(&mut res, &non_zero.into_radix(num_blocks, &self.key));
-            }
+            let non_zeros: Vec<_> = str
+                .bytes
+                .par_iter()
+                .map(|enc_c| self.key.scalar_ne_parallelized(enc_c, 0u8).into_radix(num_blocks, &self.key))
+                .collect();
+            let res = self
+                .key
+                .sum_ciphertexts_parallelized(non_zeros.iter())
+                .expect("There's at least one padding char");
             FheStringLen::Padding(res)
         } else {
             FheStringLen::NoPadding(str.bytes.len())
+        }
+    }
+
+    fn len_enc(&self, str: &FheString) -> RadixCiphertext {
+        let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
+        match self.len(str) {
+            FheStringLen::Padding(enc_val) => enc_val,
+            FheStringLen::NoPadding(val) => self.key.create_trivial_radix(val as u32, num_blocks),
         }
     }
 
@@ -519,19 +529,39 @@ mod tests {
 
     use crate::{
         client_key::U16Arg,
-        fhe_string::{GenericPattern, NUM_BLOCKS},
+        fhe_string::{FheString, GenericPattern, NUM_BLOCKS},
         generate_keys,
     };
 
     #[test]
     fn test_left_shift_chars() {
-        let s = "aff";
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
+
+        let s = "aff";
         let fhe_s = ck.enc_str(s, 0);
         let shift = sk.key.create_trivial_radix(4, NUM_BLOCKS);
         let fhe_left_shift = sk.left_shift_chars(&fhe_s, &shift);
         let s_left_shift = ck.dec_str(&fhe_left_shift);
         assert_eq!(s_left_shift, "");
+
+        let s = "\0\0h";
+        let bytes: Vec<_> = s
+            .bytes()
+            .map(|b| ck.key.encrypt_radix(b, NUM_BLOCKS))
+            .collect();
+        let fhe_s = FheString {
+            bytes,
+            padded: false,
+        };
+        let shift = sk.key.create_trivial_radix(2, NUM_BLOCKS);
+        let fhe_left_shift = sk.left_shift_chars(&fhe_s, &shift);
+        let bytes = fhe_left_shift
+            .bytes
+            .iter()
+            .map(|enc_char| ck.key.decrypt_radix(enc_char))
+            .collect();
+        let s_left_shift = String::from_utf8(bytes).unwrap();
+        assert_eq!(s_left_shift, "h\0\0");
     }
 
     #[test]

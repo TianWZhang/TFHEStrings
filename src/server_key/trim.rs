@@ -6,7 +6,7 @@ use crate::fhe_string::{FheString, NUM_BLOCKS};
 use super::{FheStringIsEmpty, FheStringIterator, FheStringLen, ServerKey};
 
 pub struct SplitAsciiWhitespace {
-    state: FheString,
+    pub(crate) state: FheString,
 }
 
 impl FheStringIterator for SplitAsciiWhitespace {
@@ -53,18 +53,16 @@ impl FheStringIterator for SplitAsciiWhitespace {
                 };
 
                 // update state
-                // item_len is `u32`
-                let mut enc_item_len = sk.key.create_trivial_zero_radix(
-                    32 / ((((sk.key.message_modulus().0) as f64).log2()) as usize),
-                );
-                for enc_c in &mask.bytes {
-                    let not_zero = sk.key.scalar_ne_parallelized(enc_c, 0u8);
-                    sk.key.add_assign_parallelized(
-                        &mut enc_item_len,
-                        &not_zero.into_radix(1, &sk.key),
-                    );
-                }
+                let enc_item_len = sk.len_enc(&mask);
+                let padded = self.state.padded;
                 self.state = sk.left_shift_chars(&self.state, &enc_item_len);
+                if padded {
+                    self.state.padded = true;
+                } else {
+                    // If `self.state` was not padded before, we cannot know if it is still not padded because of 
+                    // the left shift operation, so we ensure it's padded in order to be used in other functions safely.
+                    self.state.append_null(sk);
+                }
                 enc_item
             },
             || {
@@ -149,18 +147,12 @@ impl ServerKey {
         }
         let mut res = self.compare_trim(&str, false);
 
-        // Result has potential nulls in the leftmost chars, so we compute the length difference
-        // before and after the trimming, and use that amount to shift the result left. This
-        // makes the nulls be at the end of result.
+        // `res` has potential nulls in the leftmost chars, so we compute the length difference
+        // before and after the trimming, and use that amount to left shift the `res`. This
+        // makes the nulls be at the end of `res`.
         res.padded = true;
         if let FheStringLen::Padding(len_after_trim) = self.len(&res) {
-            let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
-            let str_len = match self.len(str) {
-                FheStringLen::Padding(enc_val) => enc_val,
-                FheStringLen::NoPadding(val) => {
-                    self.key.create_trivial_radix(val as u32, num_blocks)
-                }
-            };
+            let str_len = self.len_enc(str);
             let shift_left = self.key.sub_parallelized(&str_len, &len_after_trim);
             res = self.left_shift_chars(&res, &shift_left); // now res.padded is false since it is returned from `from_uint`
         }
@@ -234,19 +226,32 @@ mod tests {
     #[test]
     fn test_trim_start() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
+
         let s = "  hello world  ";
         let enc_s = ck.enc_str(s, 2);
         let enc_res = sk.trim_start(&enc_s);
         assert_eq!(ck.dec_str(&enc_res), "hello world  ");
+
+        let s = "  h w  ";
+        let enc_s = ck.enc_str(s, 0);
+        let enc_res = sk.trim_start(&enc_s);
+        println!("enc_res.padded: {}", enc_res.padded);
+        assert_eq!(ck.dec_str(&enc_res), "h w  ");
     }
 
     #[test]
     fn test_trim_end() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
+
         let s = "  hello world  ";
         let enc_s = ck.enc_str(s, 0);
         let enc_res = sk.trim_end(&enc_s);
         assert_eq!(ck.dec_str(&enc_res), "  hello world");
+
+        let s = "  h w  ";
+        let enc_s = ck.enc_str(s, 2);
+        let enc_res = sk.trim_end(&enc_s);
+        assert_eq!(ck.dec_str(&enc_res), "  h w");
     }
 
     #[test]
@@ -265,7 +270,7 @@ mod tests {
         // " hello \t\nworld \n".split(" ").collect() will yield ["", "hello", "\t\nworld", "\n"]
         // "hello".find("") is Some(0)
         let s = " hello \t\nworld \n";
-        let enc_s = ck.enc_str(s, 0);
+        let enc_s = ck.enc_str(s, 2);
         let mut iter = sk.split_ascii_whitespace(&enc_s);
 
         let (enc_first_item, _) = iter.next(&sk);

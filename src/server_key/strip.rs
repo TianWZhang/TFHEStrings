@@ -3,7 +3,7 @@ use tfhe::integer::{prelude::ServerKeyDefaultCMux, BooleanBlock};
 
 use crate::fhe_string::{FheString, GenericPattern, PlaintextString, NUM_BLOCKS};
 
-use super::{FheStringLen, IsMatch, ServerKey};
+use super::{IsMatch, ServerKey};
 
 impl ServerKey {
     // We only use this function in `strip_suffix` function.
@@ -109,12 +109,7 @@ impl ServerKey {
         let num_blocks = 32 / ((((self.key.message_modulus().0) as f64).log2()) as usize);
         let (is_striped, pattern_len) = rayon::join(
             || self.starts_with(str, pattern),
-            || match self.len(&trivial_or_enc_pat) {
-                FheStringLen::Padding(val) => val,
-                FheStringLen::NoPadding(val) => {
-                    self.key.create_trivial_radix(val as u32, num_blocks)
-                }
-            },
+            || self.len_enc(&trivial_or_enc_pat),
         );
 
         let shift_left = self.key.if_then_else_parallelized(
@@ -186,7 +181,10 @@ impl ServerKey {
 mod tests {
     use tfhe::shortint::prelude::PARAM_MESSAGE_2_CARRY_2;
 
-    use crate::{fhe_string::{GenericPattern, PlaintextString}, generate_keys};
+    use crate::{
+        fhe_string::{GenericPattern, PlaintextString},
+        generate_keys,
+    };
 
     #[test]
     fn test_strip_prefix() {
