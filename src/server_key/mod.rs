@@ -289,13 +289,22 @@ impl ServerKey {
         true_ct: &FheString,
         false_ct: &FheString,
     ) -> FheString {
+        let padded = true_ct.padded && false_ct.padded;
+        let potentially_padded = true_ct.padded || false_ct.padded;
         let mut true_ct_uint = true_ct.to_uint(self);
         let mut false_ct_uint = false_ct.to_uint(self);
         self.pad_ciphertexts_lsb(&mut true_ct_uint, &mut false_ct_uint);
         let res_uint = self
             .key
             .if_then_else_parallelized(condition, &true_ct_uint, &false_ct_uint);
-        FheString::from_uint(res_uint)
+        let mut res = FheString::from_uint(res_uint);
+        if padded {
+            res.padded = true;
+        } else if potentially_padded {
+            // We ensure that `res` is padded such that it can be safely used in other operations.
+            res.append_null(self);
+        }
+        res
     }
 
     fn left_shift_chars(&self, str: &FheString, shift: &RadixCiphertext) -> FheString {

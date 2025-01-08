@@ -123,9 +123,9 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, from, to) = ("hello", "l", "r");
-        let fhe_s = ck.enc_str(s, 0);
+        let fhe_s = ck.enc_str(s, 2);
         let fhe_from = GenericPattern::Clear(PlaintextString::new(from.to_string()));
-        let fhe_to = ck.enc_str(to, 0);
+        let fhe_to = ck.enc_str(to, 1);
         let n = U16Arg::Clear(1);
 
         let enc_res = sk.replacen(&fhe_s, &fhe_from, &fhe_to, &n);
@@ -139,7 +139,7 @@ mod tests {
 
         let (s, from, to) = ("hello", "l", "r");
         let fhe_s = ck.enc_str(s, 0);
-        let fhe_from = GenericPattern::Enc(ck.enc_str(from, 0));
+        let fhe_from = GenericPattern::Enc(ck.enc_str(from, 2));
         let fhe_to = ck.enc_str(to, 0);
 
         let enc_res = sk.replace(&fhe_s, &fhe_from, &fhe_to);

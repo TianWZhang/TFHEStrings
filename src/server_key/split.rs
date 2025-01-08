@@ -5,7 +5,7 @@ use crate::{
     fhe_string::{FheString, GenericPattern},
 };
 
-use super::{FheStringIsEmpty, FheStringIterator, ServerKey};
+use super::{FheStringIsEmpty, FheStringIterator, IsMatch, ServerKey};
 
 enum SplitType {
     SplitT,
@@ -197,19 +197,16 @@ impl ServerKey {
         let str_len = self
             .key
             .create_trivial_radix(str.bytes.len() as u32, num_blocks);
+        let trivial_or_enc_pat = match pattern {
+            GenericPattern::Clear(pattern) => FheString::enc_trivial(&pattern.data, self),
+            GenericPattern::Enc(pattern) => pattern.clone(),
+        };
         // lhs = str[:idx], pattern = str[idx:idx+pattern_len], rhs = str[idx+pattern_len:]
         let (mut shift_right, pattern_len) = rayon::join(
             || self.key.sub_parallelized(&str_len, &idx),
-            || {
-                let pattern_len = match pattern {
-                    GenericPattern::Clear(s) => s.len(),
-                    GenericPattern::Enc(s) => s.bytes.len(),
-                };
-                self.key
-                    .create_trivial_radix(pattern_len as u32, num_blocks)
-            },
+            || self.len_enc(&trivial_or_enc_pat),
         );
-        rayon::join(
+        let (mut lhs, mut rhs) = rayon::join(
             || {
                 if inclusive {
                     // pattern is included in lhs
@@ -223,24 +220,51 @@ impl ServerKey {
                 let shift_left = self.key.add_parallelized(&pattern_len, &idx);
                 self.left_shift_chars(str, &shift_left)
             },
-        )
+        );
+        if str.padded {
+            lhs.padded = true;
+            rhs.padded = true;
+        } else {
+            lhs.append_null(self);
+            rhs.append_null(self);
+        }
+        (lhs, rhs)
     }
 
     /// Splits the encrypted string into two substrings at the first occurrence of the pattern
     /// (either encrypted or clear) and returns a tuple of the two substrings along with a boolean
     /// indicating if the split occurred.
     ///
-    /// If the pattern is not found returns `false`, indicating the equivalent of `None`.
+    /// If the pattern is not found returns ("", str, `false`), indicating the equivalent of `None`.
     ///
     /// The pattern to search for can be specified as either `GenericPattern::Clear` for a clear
     /// string or `GenericPattern::Enc` for an encrypted string.
-    pub fn split_once(
+    pub fn split_once (
         &self,
         str: &FheString,
         pat: &GenericPattern,
     ) -> (FheString, FheString, BooleanBlock) {
+        let trivial_or_enc_pat = match pat {
+            GenericPattern::Clear(pattern) => FheString::enc_trivial(&pattern.data, self),
+            GenericPattern::Enc(pattern) => pattern.clone(),
+        };
+        match self.is_matched_early_checks(str, &trivial_or_enc_pat) {
+            IsMatch::Clear(val) => {
+                return if val {
+                    // `val` is true only if the pattern is empty, hence the first match is at the index 0
+                    (FheString::empty(), str.clone(), self.key.create_trivial_boolean_block(true))
+                } else {
+                    (FheString::empty(), str.clone(), self.key.create_trivial_boolean_block(false))
+                };
+            }
+            // This is only returned if `str` is empty.
+            IsMatch::Cipher(enc_val) => return (FheString::empty(), FheString::empty(), enc_val),
+            _ => (),
+        }
         let (enc_idx, enc_is_found) = self.find(str, pat);
-        let (lhs, rhs) = self.split_pattern_at_index(str, pat, enc_idx, false);
+        let (lhs, mut rhs) = self.split_pattern_at_index(str, pat, enc_idx, false);
+        // If `str` doesn't match `pat`, we return `str` as the right hand side string.
+        rhs = self.conditional_fhestring(&enc_is_found, &rhs, str);
         (lhs, rhs, enc_is_found)
     }
 
@@ -248,7 +272,7 @@ impl ServerKey {
     /// (either encrypted or clear) and returns a tuple of the two substrings along with a boolean
     /// indicating if the split occurred.
     ///
-    /// If the pattern is not found returns `false`, indicating the equivalent of `None`.
+    /// If the pattern is not found returns ("", str, `false`), indicating the equivalent of `None`.
     ///
     /// The pattern to search for can be specified as either `GenericPattern::Clear` for a clear
     /// string or `GenericPattern::Enc` for an encrypted string.
@@ -257,10 +281,30 @@ impl ServerKey {
         str: &FheString,
         pat: &GenericPattern,
     ) -> (FheString, FheString, BooleanBlock) {
+        let trivial_or_enc_pat = match pat {
+            GenericPattern::Clear(pattern) => FheString::enc_trivial(&pattern.data, self),
+            GenericPattern::Enc(pattern) => pattern.clone(),
+        };
+        match self.is_matched_early_checks(str, &trivial_or_enc_pat) {
+            IsMatch::Clear(val) => {
+                return if val {
+                    // `val` is true only if the pattern is empty, hence the last match is at the end
+                    (str.clone(), FheString::empty(), self.key.create_trivial_boolean_block(true))
+                } else {
+                    (FheString::empty(), str.clone(), self.key.create_trivial_boolean_block(false))
+                };
+            }
+            // This is only returned if `str` is empty.
+            IsMatch::Cipher(enc_val) => return (FheString::empty(), FheString::empty(), enc_val),
+            _ => (),
+        }
         let (enc_idx, enc_is_found) = self.rfind(str, pat);
-        let (lhs, rhs) = self.split_pattern_at_index(str, pat, enc_idx, false);
+        let (lhs, mut rhs) = self.split_pattern_at_index(str, pat, enc_idx, false);
+        // If `str` doesn't match `pat`, we return `str` as the right hand side string.
+        rhs = self.conditional_fhestring(&enc_is_found, &rhs, str);
         (lhs, rhs, enc_is_found)
     }
+
 
     /// Creates an iterator of encrypted substrings by splitting the original encrypted string based
     /// on a specified pattern (either encrypted or clear).
@@ -481,13 +525,13 @@ mod tests {
 
         let (s, pat) = ("hel", "x");
         let fhe_s = ck.enc_str(s, 0);
-        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 0));
+        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 2));
         let (lhs, rhs, split_occurred) = sk.split_once(&fhe_s, &fhe_pat);
         let lhs_decrypted = ck.dec_str(&lhs);
         let rhs_decrypted = ck.dec_str(&rhs);
         let split_occurred = ck.key.decrypt_bool(&split_occurred);
-        assert_eq!(lhs_decrypted, "hel");
-        assert_eq!(rhs_decrypted, "");
+        assert_eq!(lhs_decrypted, "");
+        assert_eq!(rhs_decrypted, "hel");
         assert!(!split_occurred);
     }
 
@@ -496,7 +540,7 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("helelo", "el");
-        let fhe_s = ck.enc_str(s, 0);
+        let fhe_s = ck.enc_str(s, 1);
         let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 0));
         let (lhs, rhs, split_occurred) = sk.split_once(&fhe_s, &fhe_pat);
         let lhs_decrypted = ck.dec_str(&lhs);
@@ -511,14 +555,14 @@ mod tests {
     fn test_rsplit_once_non_occurred() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
         let (s, pat) = ("h", "xx");
-        let fhe_s = ck.enc_str(s, 0);
-        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 0));
+        let fhe_s = ck.enc_str(s, 2);
+        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 1));
         let (lhs, rhs, split_occurred) = sk.rsplit_once(&fhe_s, &fhe_pat);
         let lhs_decrypted = ck.dec_str(&lhs);
         let rhs_decrypted = ck.dec_str(&rhs);
         let split_occurred = ck.key.decrypt_bool(&split_occurred);
-        assert_eq!(lhs_decrypted, "h");
-        assert_eq!(rhs_decrypted, "");
+        assert_eq!(lhs_decrypted, "");
+        assert_eq!(rhs_decrypted, "h");
         assert!(!split_occurred);
     }
 
@@ -545,7 +589,7 @@ mod tests {
         // ["", "h", "e", "l", ""]
         let (s, pat) = ("hel", "");
         let fhe_s = ck.enc_str(s, 0);
-        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 0));
+        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 2));
         let mut split_iter = sk.split(&fhe_s, &fhe_pat);
 
         let (enc_first_item, enc_first_is_some) = split_iter.next(&sk);
@@ -591,7 +635,7 @@ mod tests {
 
         // ["hel", ""]
         let (s, pat) = ("hel ", " ");
-        let fhe_s = ck.enc_str(s, 0);
+        let fhe_s = ck.enc_str(s, 2);
         let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
         let mut split_iter = sk.split(&fhe_s, &fhe_pat);
 
@@ -645,7 +689,7 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = (" h el ", " ");
-        let fhe_s = ck.enc_str(s, 0);
+        let fhe_s = ck.enc_str(s, 2);
         let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
         let mut iter = sk.split_terminator(&fhe_s, &fhe_pat);
 
@@ -677,7 +721,7 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = (" h el ", " ");
-        let fhe_s = ck.enc_str(s, 0);
+        let fhe_s = ck.enc_str(s, 1);
         let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
         let mut iter = sk.rsplit_terminator(&fhe_s, &fhe_pat);
 
@@ -709,7 +753,7 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("h el", " ");
-        let fhe_s = ck.enc_str(s, 0);
+        let fhe_s = ck.enc_str(s, 1);
         let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
 
         let n = U16Arg::Clear(1);
@@ -746,8 +790,8 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("h el", " ");
-        let fhe_s = ck.enc_str(s, 0);
-        let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
+        let fhe_s = ck.enc_str(s, 2);
+        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 1));
         let n = U16Arg::Enc(ck.encrypt_u16(2, Some(3)));
         let mut iter = sk.rsplitn(&fhe_s, &fhe_pat, &n);
 
