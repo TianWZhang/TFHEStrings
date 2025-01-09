@@ -83,12 +83,18 @@ impl FheStringIterator for Split {
         };
 
         let res = if let SplitType::RSplitT = self.split_type {
+            // If `is_some` is false, `idx` is equal to 0, but `rhs` doesn't equal to `self.state` 
+            // because `split_pattern_at_index` will cut off a prefix of length `pat.len()` even if
+            // that prefix doesn't match `pat`.
             let res = sk.conditional_fhestring(&is_some, &rhs, &self.state);
-            self.state = sk.conditional_fhestring(&is_some, &lhs, &FheString::empty());
+            self.state = lhs;
             res
         } else {
+            let res = sk.conditional_fhestring(&is_some, &lhs, &self.state);
+            // If `is_some` is false, `lhs` doesn't necessarily equal to the empty string but we don't care 
+            // it any more.
             self.state = rhs;
-            lhs
+            res
         };
 
         let curr_is_some = is_some.clone();
@@ -633,6 +639,65 @@ mod tests {
     fn test_split_with_nonempty_pattern() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
+        // ["hel", "wor"]
+        let (s, pat) = ("helxxwor", "xx");
+        let fhe_s = ck.enc_str(s, 2);
+        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 1));
+        let mut split_iter = sk.split(&fhe_s, &fhe_pat);
+
+        let (enc_first_item, enc_first_is_some) = split_iter.next(&sk);
+        let first_item = ck.dec_str(&enc_first_item);
+        let first_is_some = ck.key.decrypt_bool(&enc_first_is_some);
+        assert_eq!(first_item.as_str(), "hel");
+        assert!(first_is_some);
+
+        let (enc_second_item, enc_second_is_some) = split_iter.next(&sk);
+        let second_item = ck.dec_str(&enc_second_item);
+        let second_is_some = ck.key.decrypt_bool(&enc_second_is_some);
+        assert_eq!(second_item.as_str(), "wor");
+        assert!(second_is_some);
+
+        // If `third_is_some` is false, we don't care `third_item` any more.
+        let (_, enc_third_is_some) = split_iter.next(&sk);
+        let third_is_some = ck.key.decrypt_bool(&enc_third_is_some);
+        assert!(!third_is_some);
+    }
+
+    #[test]
+    fn test_rsplit_with_nonempty_pattern() {
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
+
+        // ["wor", "hel"]
+        let (s, pat) = ("helxxwor", "xx");
+        let fhe_s = ck.enc_str(s, 0);
+        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 0));
+        let mut split_iter = sk.rsplit(&fhe_s, &fhe_pat);
+
+        let (enc_first_item, enc_first_is_some) = split_iter.next(&sk);
+        let first_item = ck.dec_str(&enc_first_item);
+        let first_is_some = ck.key.decrypt_bool(&enc_first_is_some);
+        assert_eq!(first_item.as_str(), "wor");
+        assert!(first_is_some);
+        assert_eq!(ck.dec_str(&split_iter.state), "hel");
+
+        let (enc_second_item, enc_second_is_some) = split_iter.next(&sk);
+        let second_item = ck.dec_str(&enc_second_item);
+        let second_is_some = ck.key.decrypt_bool(&enc_second_is_some);
+        assert_eq!(ck.dec_str(&split_iter.state), "");
+        assert_eq!(second_item.as_str(), "hel");
+        assert!(second_is_some);
+
+        let (enc_third_item, enc_third_is_some) = split_iter.next(&sk);
+        let third_item = ck.dec_str(&enc_third_item);
+        let third_is_some = ck.key.decrypt_bool(&enc_third_is_some);
+        assert_eq!(third_item.as_str(), "");
+        assert!(!third_is_some);
+    }
+
+    #[test]
+    fn test_split_with_whitespace_pattern() {
+        let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
+
         // ["hel", ""]
         let (s, pat) = ("hel ", " ");
         let fhe_s = ck.enc_str(s, 2);
@@ -663,7 +728,7 @@ mod tests {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
         let (s, pat) = ("h el ", " ");
-        let fhe_s = ck.enc_str(s, 0);
+        let fhe_s = ck.enc_str(s, 2);
         let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
         let mut iter = sk.split_inclusive(&fhe_s, &fhe_pat);
 
@@ -722,7 +787,7 @@ mod tests {
 
         let (s, pat) = (" h el ", " ");
         let fhe_s = ck.enc_str(s, 1);
-        let fhe_pat = GenericPattern::Clear(PlaintextString::new(pat.to_string()));
+        let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 2));
         let mut iter = sk.rsplit_terminator(&fhe_s, &fhe_pat);
 
         let (enc_first_item, enc_first_is_some) = iter.next(&sk);
@@ -779,7 +844,7 @@ mod tests {
         let second_item = ck.dec_str(&enc_second_item);
         let second_is_some = ck.key.decrypt_bool(&enc_second_is_some);
         assert_eq!(second_item.as_str(), "el");
-        assert!(!second_is_some);
+        assert!(second_is_some);
         let (_, enc_third_is_some) = iter.next(&sk);
         let third_is_some = ck.key.decrypt_bool(&enc_third_is_some);
         assert!(!third_is_some);
@@ -789,7 +854,7 @@ mod tests {
     fn test_rsplitn() {
         let (ck, sk) = generate_keys(PARAM_MESSAGE_2_CARRY_2);
 
-        let (s, pat) = ("h el", " ");
+        let (s, pat) = ("h el lo", " ");
         let fhe_s = ck.enc_str(s, 2);
         let fhe_pat = GenericPattern::Enc(ck.enc_str(pat, 1));
         let n = U16Arg::Enc(ck.encrypt_u16(2, Some(3)));
@@ -798,14 +863,14 @@ mod tests {
         let (enc_first_item, enc_first_is_some) = iter.next(&sk);
         let first_item = ck.dec_str(&enc_first_item);
         let first_is_some = ck.key.decrypt_bool(&enc_first_is_some);
-        assert_eq!(first_item.as_str(), "el");
+        assert_eq!(first_item.as_str(), "lo");
         assert!(first_is_some);
 
         let (enc_second_item, enc_second_is_some) = iter.next(&sk);
         let second_item = ck.dec_str(&enc_second_item);
         let second_is_some = ck.key.decrypt_bool(&enc_second_is_some);
-        assert_eq!(second_item.as_str(), "h");
-        assert!(!second_is_some);
+        assert_eq!(second_item.as_str(), "h el");
+        assert!(second_is_some);
 
         let (_, enc_third_is_some) = iter.next(&sk);
         let third_is_some = ck.key.decrypt_bool(&enc_third_is_some);
