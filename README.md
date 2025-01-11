@@ -33,7 +33,7 @@ Inspired by [1], we take a similar approach to implement conversions between enc
 
 The encrypted strings (`FheString`) support the encryption of `\0`-padded plaintext strings. Padding allows us to hide the length of the plaintext string. Furthermore, padding is necessary in some cases such as strip, split and trim. For example, `trim()` returns a new encrypted string with whitespace removed from both the start and end. Instead of actually removing whitespace, we replace them with `\0` to remove them logically. Even if the original `FheString` is not padded, after some homomorphic string operations, it will inevitably become padded.
 
-TODO: pesudo code of split, trim_start, replace
+TODO: pesudo code of split, replace
 
 ```rust
     /// Returns a tuple containing the byte index of the first character from the end of this
@@ -57,6 +57,89 @@ TODO: pesudo code of split, trim_start, replace
     }
 ```
 
+```rust
+    /// Returns a new encrypted string with whitespace removed from the start.
+    pub fn trim_start(&self, str: &FheString) -> FheString {
+        // if `str` is empty, return.
+        // Replace the leading whitespace of `str` with `\0`.
+        // The result has potential `\0` in the leftmost chars, so we compute the length difference
+        // before and after the trimming, and use that amount to left shift the `res`. This
+        // makes the nulls be at the end of `res`.
+        // If str was not padded originally we don't know if `res` has nulls at the end or not (we
+        // don't know if str was shifted or not) so we ensure it's padded in order to be
+        // used in other functions safely
+    }
+```
+
+```rust
+impl FheStringIterator for SplitAsciiWhitespace {
+    // The `is_some` of type `BooleanBlock` determines whether the result is `None`. If `is_some` is
+    // false, we ignore the value of `item`.
+    fn next(&mut self, sk: &ServerKey) -> (FheString, BooleanBlock) {
+        let str_len = self.state.bytes.len();
+
+        // `self.state` stores the remaining string.
+        // Every time we call `next()`, we first remove the leading whitespace of `self.state`.
+        self.state = sk.trim_start(&self.state);
+        let cur_state = self.state.clone();
+
+        // create the mask
+        // `mask` is 1 until we encounter the first whitespace, then it becomes 0. For example,
+        // if `self.state` is "aaa\n bbc", then mask is [255, 255, 255, 0, 0, 0, 0, 0].
+        
+        // Then we apply the mask to obtain the next item. Using the above example again,
+        // `item` becomes "aaa\0\0\0\0\0"
+
+        // update state
+        // we left shift `self.state` by the length of `item`.
+        // If `self.state` was not padded before, we cannot know if it is still not padded because of 
+        // the left shift operation, so we ensure it's padded in order to be used in other functions safely.
+    }
+}
+```
+
+```rust
+/// Returns a new encrypted string with a specified number of non-overlapping occurrences of a
+    /// pattern (either encrypted or clear) replaced by another specified encrypted pattern.
+    ///
+    /// The number of replacements to perform is specified by a `U16Arg`, which can be either
+    /// `Clear` or `Enc`. In the `Clear` case, the function uses a plain `u16` value for the count.
+    /// In the `Enc` case, the count is an encrypted `u16` value, encrypted with `ck.encrypt_u16`.
+    ///
+    /// If the pattern to be replaced is not found or the count is zero, returns the original
+    /// encrypted string unmodified.
+    ///
+    /// The pattern to search for can be either `GenericPattern::Clear` for a clear string or
+    /// `GenericPattern::Enc` for an encrypted string, while the replacement pattern is always
+    /// encrypted.
+    pub fn replacen(
+        &self,
+        str: &FheString,
+        from: &GenericPattern,
+        to: &FheString,
+        n: &U16Arg,
+    ) -> FheString {
+        // We need to split the string into `n + 1` parts, hence we have to call splitn with n + 1.
+        let mut iter = self.splitn(str, from, &n);
+
+        let (first_item, mut concated) = iter.next(self);
+        let mut res = first_item;
+
+        // If `n` is plaintext, we will call `next()` `n` times.
+        // If `n` is encrypted, we have to compute the maximal possible times that `str` match `to` and then
+        // call `next()` `max_matches-1` times.
+        // If  `is_some` returned from `next()` is true, we will concat `res`, `to` and `item` (also returned from `next`) together.
+                for _ in 0..max_matches - 1 {
+                    let (item, is_some) = iter.next(self);
+                    self.key.boolean_bitand_assign(&mut concated, &is_some);
+                    let mut concated_str = self.concat(&res, to);
+                    concated_str = self.concat(&concated_str, &item);
+                    res = self.conditional_fhestring(&concated, &concated_str, &res);
+                }
+        res
+    }
+```
+
 ## Test Cases
 
 We have handled corner cases like empty strings and empty patterns (with and without padding), the number of repetitions `n` (clear and encrypted) being zero, etc.
@@ -71,22 +154,3 @@ Wrapper the methods in FheString with thread_local.
 
 [1]: https://github.com/JoseSK999/fhe_strings
 [2]: ZAMA tfhe.rs doc
-
-
-```
-    keys.assert_split_once(str, str_pad, pat, pat_pad);
-    keys.assert_rsplit_once(str, str_pad, pat, pat_pad);
-
-    keys.assert_split(str, str_pad, pat, pat_pad);
-    keys.assert_rsplit(str, str_pad, pat, pat_pad);
-
-    keys.assert_split_terminator(str, str_pad, pat, pat_pad);
-    keys.assert_rsplit_terminator(str, str_pad, pat, pat_pad);
-    keys.assert_split_inclusive(str, str_pad, pat, pat_pad);
-
-    keys.assert_splitn(str, str_pad, pat, pat_pad, n, max);
-    keys.assert_rsplitn(str, str_pad, pat, pat_pad, n, max);
-
-    keys.assert_replace(str, str_pad, pat, pat_pad, to, to_pad);
-    keys.assert_replacen((str, str_pad), (pat, pat_pad), (to, to_pad), n, max);
-```

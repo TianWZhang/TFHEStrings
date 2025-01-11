@@ -122,7 +122,6 @@ impl ServerKey {
             .bytes
             .iter()
             .map(|c| {
-                // Can we always replace `starts_with_null` with false?
                 let mut is_ws = self.is_whitespace(c, starts_with_null);
                 self.key.boolean_bitand_assign(&mut is_ws, &prev_was_ws);
                 let new_c = self.key.if_then_else_parallelized(
